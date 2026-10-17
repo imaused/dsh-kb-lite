@@ -1,0 +1,52 @@
+{
+  "name": "dsh-kb-lite",
+  "version": "0.1.0",
+  "description": "Local knowledge base for DeepSeek Harness: ingest Markdown/TXT/PDF, hybrid BM25 + optional dense retrieval, cited answers. Host-only plugin, five tools, no network.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "engine",
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh.md",
+    "SECURITY.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-tools": ">=0.1.0-rc.6 <0.2.0-0 || >=0.2.0-rc.1 <0.3.0-0"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek",
+    "harness",
+    "dsh",
+    "rag",
+    "knowledge-base",
+    "bm25",
+    "local",
+    "retrieval"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/REPLACE_OWNER/dsh-kb-lite.git"
+  },
+  "scripts": {
+    "test": "node test/run-all.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

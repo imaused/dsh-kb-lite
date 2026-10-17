@@ -1,0 +1,8 @@
+Notes for the knowledge base engine.
+
+The plain text splitter merges paragraphs greedily until the chunk limit is reached.
+It keeps the original line ranges so citations can point back into the file.
+
+中文备注：纯文本按空行分段，贪心合并到一千二百字符，重叠一百二十字符。
+
+Second English paragraph: retrieval is BM25 first, dense second, hybrid when both are available.

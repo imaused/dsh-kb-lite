@@ -1,0 +1,8 @@
+node_modules/
+.kb-lite/
+__pycache__/
+*.pyc
+.venv/
+test/tmp/
+*.log
+.DS_Store

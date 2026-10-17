@@ -1,0 +1,6 @@
+# dsh-kb-lite bundle patch: insert the Host plugin row into the profile.
+# Activated automatically by `dsh plugin --profile <name> add dsh-kb-lite`; the
+# package must be resolvable from the profile root.
+- insert:
+    - id: kb-lite
+      name: dsh-kb-lite
