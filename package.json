@@ -11,7 +11,7 @@
   },
   "files": [
     "lib",
-    "engine",
+    "engine/kb_engine.py",
     "cordis.patch.yml",
     "README.md",
     "README.zh.md",

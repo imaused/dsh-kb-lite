@@ -32,7 +32,7 @@ const child = spawnFn(argv[0], argv.slice(1), {
 
 | Part | Value |
 | --- | --- |
-| `argv[0]` | `cachedPython`: `KB_LITE_PYTHON` if set, otherwise the first candidate that passed the probe. |
+| `argv[0]` | `cachedPython`: the first candidate that passed the probe — `KB_LITE_PYTHON` if set, otherwise `python`, then `python3`, then `py`. |
 | `argv[1]` | `enginePath`: the absolute path to `engine/kb_engine.py` inside the installed package. |
 | Further arguments | None. No file paths, no queries, no flags. |
 | Shell | None. `spawn` is called with an argument vector and without `shell: true`; nothing is interpolated into a command line. |
@@ -68,7 +68,7 @@ const result = spawnSync(
 - The engine is started lazily, on the first tool call.
 - If it exits unexpectedly, the plugin rejects in-flight requests with `engine_restarted` and starts a replacement, up to 3 times with a 150–500 ms backoff. After that it gives up: the state is `engine_dead` and tool calls fail until DSH restarts.
 - At most **one** engine process per plugin instance is alive at any moment. A replacement is started only after the previous one has exited.
-- When the plugin is disposed, the plugin calls `kill()`: stdin is closed, then `SIGTERM`, then `SIGKILL` if the process is still alive one second later. A `process.on('exit')` hook repeats the best-effort kill if DSH exits first.
+- When the plugin is disposed, the host half calls `kill()`: stdin is closed, then `SIGTERM`, then `SIGKILL` if the process is still alive one second later. A `process.on('exit')` hook repeats the best-effort kill if DSH exits first.
 
 ## What it reads
 
@@ -89,7 +89,7 @@ Only inside `kb_root`:
 | `vectors.npy` or `vectors.json` | Optional embeddings, when the dense stack is available. |
 | `engine.log` | Engine log lines; the engine's stderr is mirrored here. |
 
-Writes are atomic: the engine writes a temporary `<name>.tmp.<pid>` file inside `kb_root` and renames it into place, so a crash mid-write cannot leave a half-written index. Every one of these paths is produced by `_child(root, name)`, which resolves the real path and raises `path_escape` if it would land outside `kb_root` — a fixed set of names, joined to the root and checked, not a path assembled from user input.
+Writes are atomic: the engine writes a temporary `<name>.tmp.<pid>` file inside `kb_root` and renames it into place, so a crash mid-write cannot leave a half-written index. The index files — `manifest.json`, `chunks.jsonl`, `vectors.npy`, `vectors.json` — are produced by `_child(root, name)`, which resolves the real path and raises `path_escape` if it would land outside `kb_root`; `engine.log` is a fixed name appended to the root. None of these names comes from user input.
 
 `kb_root` is created if it does not exist. `kb_clear` deletes the index files there (`manifest.json`, `chunks.jsonl`, both vector files); your source documents are never touched, and `engine.log` is left in place. The plugin writes nothing outside `kb_root`.
 
