@@ -157,6 +157,7 @@ These are known and not hidden behind configuration:
 - **No Zotero (or any bibliography) import.** Point `kb_ingest` at files on disk; that is the only entry point.
 - **No OCR.** A scanned PDF has no text layer, so it yields nothing. Run OCR yourself first and ingest the text.
 - **No incremental vector-store update.** Every ingest rewrites the whole vector file to match the new chunk list; unchanged chunks reuse their cached embeddings, but there is no append and no background compaction.
+- **The BM25 index is rebuilt per query, not cached.** That is fine for the intended size (hundreds of files, thousands of chunks) and it keeps the on-disk format trivial; it is not the design to pick for a hundred-thousand-chunk corpus. Measured on this machine: 25 chunks answer a query in milliseconds; the cost grows with the corpus, not with the query.
 - **Chunk size is fixed.** 1200 characters with 120 of overlap. There is no per-call or per-file override.
 - **Four extensions only.** `.md`, `.markdown`, `.txt`, `.pdf`. DOCX, HTML and EPUB are not read.
 - **The engine is a per-plugin-instance process, not a shared daemon.** Each DSH instance that loads the plugin starts its own `python engine/kb_engine.py`. Two profiles mean two processes, each loading its own copy of the embedding model if dense retrieval is on — not one shared service.
