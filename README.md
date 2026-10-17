@@ -36,10 +36,10 @@ dsh plugin --profile web add dsh-kb-lite
 Or straight from GitHub:
 
 ```sh
-dsh plugin --profile web add github:REPLACE_OWNER/dsh-kb-lite
+dsh plugin --profile web add github:imaused/dsh-kb-lite
 ```
 
-Replace `REPLACE_OWNER` with the GitHub account that publishes the repository. Use your profile name if it is not `web` (`--profile desktop`, for example).
+Replace `imaused` with the GitHub account that publishes the repository. Use your profile name if it is not `web` (`--profile desktop`, for example).
 
 After it installs, restart DSH and open a **new** session. Tools are bound when a session is created; a session that was already open will not see them.
 

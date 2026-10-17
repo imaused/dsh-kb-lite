@@ -1,5 +1,5 @@
-url: https://github.com/REPLACE_OWNER/dsh-kb-lite
-name: REPLACE_OWNER/dsh-kb-lite
+url: https://github.com/imaused/dsh-kb-lite
+name: imaused/dsh-kb-lite
 category: memory
 description:
   en: 'Local knowledge base for DeepSeek Harness: five tools to ingest Markdown, plain text and PDF files, search them with BM25 or hybrid BM25 plus optional local embeddings, and answer with cited source passages. Runs offline with no database server.'

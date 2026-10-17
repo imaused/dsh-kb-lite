@@ -39,7 +39,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/REPLACE_OWNER/dsh-kb-lite.git"
+    "url": "git+https://github.com/imaused/dsh-kb-lite.git"
   },
   "scripts": {
     "test": "node test/run-all.mjs"

@@ -36,10 +36,10 @@ dsh plugin --profile web add dsh-kb-lite
 或者直接从 GitHub 装：
 
 ```sh
-dsh plugin --profile web add github:REPLACE_OWNER/dsh-kb-lite
+dsh plugin --profile web add github:imaused/dsh-kb-lite
 ```
 
-把 `REPLACE_OWNER` 换成发布这个仓库的 GitHub 账号。如果你的 profile 不叫 `web`，换成自己的名字（例如 `--profile desktop`）。
+把 `imaused` 换成发布这个仓库的 GitHub 账号。如果你的 profile 不叫 `web`，换成自己的名字（例如 `--profile desktop`）。
 
 装完重启 DSH，并开一个**新**会话。工具是在会话创建时绑定的；已经开着的会话看不到它们。
 

@@ -4,13 +4,13 @@ The plugin list is generated from `data/plugins/*.yml`. A submission is one pull
 
 Source of the rules quoted here: [awesome-dsh-plugin contributing guide](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/blob/main/contributing.md). Check it before submitting; the registry changes its rules and it stays authoritative over this page.
 
-Placeholders: every `REPLACE_OWNER` below must become the GitHub account that owns the repository.
+Placeholders: every `imaused` below must become the GitHub account that owns the repository.
 
 ## 1. What the list requires
 
 A pull request that adds:
 
-- **Exactly one new file**, named after the repository: `data/plugins/<owner>__<repo>.yml` — two underscores between owner and repository name. For this plugin that is `data/plugins/REPLACE_OWNER__dsh-kb-lite.yml`.
+- **Exactly one new file**, named after the repository: `data/plugins/<owner>__<repo>.yml` — two underscores between owner and repository name. For this plugin that is `data/plugins/imaused__dsh-kb-lite.yml`.
 - **`dsh.bundle` declared in the repository's `package.json`.** This is what makes the package installable with `dsh plugin add`. A package that declares only `dsh.client` is not installable and is rejected at this check. `dsh-kb-lite` declares it:
 
   ```json
@@ -35,11 +35,11 @@ Do not edit the registry's `README.md` or `README.zh.md`. They are generated fro
 
 ## 2. The exact YAML to add
 
-File to create: `data/plugins/REPLACE_OWNER__dsh-kb-lite.yml`
+File to create: `data/plugins/imaused__dsh-kb-lite.yml`
 
 ```yaml
-url: https://github.com/REPLACE_OWNER/dsh-kb-lite
-name: REPLACE_OWNER/dsh-kb-lite
+url: https://github.com/imaused/dsh-kb-lite
+name: imaused/dsh-kb-lite
 category: memory
 description:
   en: 'Local knowledge base: ingest Markdown, plain text and PDF into a local index, then retrieve passages with BM25 or an optional hybrid dense mode. Five tools; BM25 needs only the Python standard library, and the engine makes no network requests.'
@@ -63,7 +63,7 @@ A wording change that keeps every claim true is fine. Adding a claim that the co
 Public repository named `dsh-kb-lite`. Create it empty — no README, no `.gitignore`, no license file — because the local tree already has them and a generated initial commit only produces a merge.
 
 ```sh
-gh repo create REPLACE_OWNER/dsh-kb-lite --public --description "Local knowledge base plugin for DeepSeek Harness: five tools, BM25 plus optional dense retrieval, no network"
+gh repo create imaused/dsh-kb-lite --public --description "Local knowledge base plugin for DeepSeek Harness: five tools, BM25 plus optional dense retrieval, no network"
 ```
 
 Or create it in the web UI and leave "Initialize this repository with" unchecked.
@@ -72,8 +72,8 @@ Or create it in the web UI and leave "Initialize this repository with" unchecked
 
 Do these in the working copy, once:
 
-1. **Replace `REPLACE_OWNER` in `package.json`.** The `repository.url` field must be `git+https://github.com/REPLACE_OWNER/dsh-kb-lite.git` with the owner filled in. This is not cosmetic: the registry links a published npm package to the listing by reading that field, and with a placeholder in it nothing links. It is also the first thing a maintainer sees when they open the repo.
-2. **Replace `REPLACE_OWNER` in `README.md` and `README.zh.md`** (the `github:` install command), and in this document.
+1. **Replace `imaused` in `package.json`.** The `repository.url` field must be `git+https://github.com/imaused/dsh-kb-lite.git` with the owner filled in. This is not cosmetic: the registry links a published npm package to the listing by reading that field, and with a placeholder in it nothing links. It is also the first thing a maintainer sees when they open the repo.
+2. **Replace `imaused` in `README.md` and `README.zh.md`** (the `github:` install command), and in this document.
 3. **Run the test suite** and make sure it passes:
 
    ```sh
@@ -101,7 +101,7 @@ git init
 git add .
 git commit -m "dsh-kb-lite 0.1.0"
 git branch -M main
-git remote add origin https://github.com/REPLACE_OWNER/dsh-kb-lite.git
+git remote add origin https://github.com/imaused/dsh-kb-lite.git
 git push -u origin main
 ```
 
@@ -114,13 +114,13 @@ In the web UI: repository page → **About** (the gear icon) → **Topics** → 
 Or with the CLI:
 
 ```sh
-gh repo edit REPLACE_OWNER/dsh-kb-lite --add-topic dsh-plugin
+gh repo edit imaused/dsh-kb-lite --add-topic dsh-plugin
 ```
 
 Verify it is there:
 
 ```sh
-gh repo view REPLACE_OWNER/dsh-kb-lite --json repositoryTopics
+gh repo view imaused/dsh-kb-lite --json repositoryTopics
 ```
 
 ### 3.5 Wait at least one day
@@ -135,13 +135,13 @@ cd awesome-dsh-plugin
 git switch -c add-dsh-kb-lite
 ```
 
-Create `data/plugins/REPLACE_OWNER__dsh-kb-lite.yml` with exactly the content in section 2, then:
+Create `data/plugins/imaused__dsh-kb-lite.yml` with exactly the content in section 2, then:
 
 ```sh
-git add data/plugins/REPLACE_OWNER__dsh-kb-lite.yml
-git commit -m "Add REPLACE_OWNER/dsh-kb-lite"
+git add data/plugins/imaused__dsh-kb-lite.yml
+git commit -m "Add imaused/dsh-kb-lite"
 git push -u origin add-dsh-kb-lite
-gh pr create --title "Add REPLACE_OWNER/dsh-kb-lite" --body "Adds dsh-kb-lite: host-only knowledge base plugin. Five tools (kb_ingest, kb_search, kb_ask, kb_stats, kb_clear); ingests Markdown, plain text and PDF; BM25 with the Python standard library, optional dense retrieval, RRF hybrid; local index directory, no network from the engine."
+gh pr create --title "Add imaused/dsh-kb-lite" --body "Adds dsh-kb-lite: host-only knowledge base plugin. Five tools (kb_ingest, kb_search, kb_ask, kb_stats, kb_clear); ingests Markdown, plain text and PDF; BM25 with the Python standard library, optional dense retrieval, RRF hybrid; local index directory, no network from the engine."
 ```
 
 The PR should contain exactly one added file and touch nothing else. If a check fails, the comment says what to change — push the fix to the same branch. Do not open a second PR.
@@ -185,10 +185,10 @@ npm publish --access public
 
 Before publishing, confirm:
 
-- **`repository` points at the repository being listed.** It must be `git+https://github.com/REPLACE_OWNER/dsh-kb-lite.git` with the real owner. If it points anywhere else, or still says `REPLACE_OWNER`, the package and the listing are not linked — silently, with no error.
+- **`repository` points at the repository being listed.** It must be `git+https://github.com/imaused/dsh-kb-lite.git` with the real owner. If it points anywhere else, or still says `imaused`, the package and the listing are not linked — silently, with no error.
 - **The version is new.** `npm publish` fails on a version that already exists; bump `version` in `package.json` first.
 - **`npm pack --dry-run` shows what you expect**: `lib/`, `engine/`, `cordis.patch.yml`, `README.md`, `README.zh.md`, `SECURITY.md`, `LICENSE`, plus `package.json` itself.
-- **The README install command works.** `dsh plugin --profile web add dsh-kb-lite` resolves through the npm registry, so it only works after a successful publish. Before that, the `github:REPLACE_OWNER/dsh-kb-lite` form is the only one that installs.
+- **The README install command works.** `dsh plugin --profile web add dsh-kb-lite` resolves through the npm registry, so it only works after a successful publish. Before that, the `github:imaused/dsh-kb-lite` form is the only one that installs.
 
 **Do not add an `npm:` key to the entry YAML.** The mapping is collected automatically from the registry via the `repository` field; a hand-written `npm:` is rejected. There is nothing to announce and no field to fill in.
 
@@ -200,10 +200,10 @@ Everything below needs an account or a credential. It cannot be done by a tool, 
 
 | # | Owner-only action | Why it is owner-only | Command or place |
 | --- | --- | --- | --- |
-| 1 | Create the GitHub repository | Needs a GitHub account with permission to create repos | `gh repo create REPLACE_OWNER/dsh-kb-lite --public` |
-| 2 | Replace `REPLACE_OWNER` in `package.json`, both READMEs and this document | The owner is the only one who knows the account name | edit `repository.url` and the `github:` install lines |
+| 1 | Create the GitHub repository | Needs a GitHub account with permission to create repos | `gh repo create imaused/dsh-kb-lite --public` |
+| 2 | Replace `imaused` in `package.json`, both READMEs and this document | The owner is the only one who knows the account name | edit `repository.url` and the `github:` install lines |
 | 3 | Make the first commit and push | Push rights on the repository | `git push -u origin main` |
-| 4 | Add the `dsh-plugin` topic | Repository settings | `gh repo edit REPLACE_OWNER/dsh-kb-lite --add-topic dsh-plugin` |
+| 4 | Add the `dsh-plugin` topic | Repository settings | `gh repo edit imaused/dsh-kb-lite --add-topic dsh-plugin` |
 | 5 | Let the repository age past 1 day | It is a property of the repository | wait |
 | 6 | Fork the registry and open the PR | Needs a GitHub account, and the PR is authored by a person | `gh repo fork awesome-dsh-plugin/awesome-dsh-plugin --clone` |
 | 7 | Answer review comments and push fixes | The PR author's branch | same branch, new commit |
