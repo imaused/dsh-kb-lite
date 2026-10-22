@@ -206,5 +206,37 @@ class WeightValidationTests(unittest.TestCase):
         self.assertEqual(error["code"], "bad_request")
 
 
+class RerankConfigTests(unittest.TestCase):
+    """Parsing only — the cross-encoder itself is never loaded here (no model in CI)."""
+
+    def setUp(self):
+        from engine_test import KB
+        self.kb = KB
+
+    def test_disabled_by_default(self):
+        self.assertIsNone(self.kb._parse_weights({})["rerank"])
+        self.assertIsNone(self.kb._parse_weights({"rerank": False})["rerank"])
+        self.assertIsNone(self.kb._parse_weights({"rerank": None})["rerank"])
+
+    def test_true_fills_the_defaults(self):
+        cfg = self.kb._parse_weights({"rerank": True})["rerank"]
+        self.assertEqual(cfg["top_n"], self.kb.RERANK_TOP_N)
+        self.assertAlmostEqual(cfg["blend"], self.kb.RERANK_BLEND)
+        self.assertEqual(cfg["model"], self.kb.RERANK_MODEL)
+
+    def test_object_overrides_top_n_and_blend(self):
+        cfg = self.kb._parse_weights({"rerank": {"top_n": 5, "blend": 0.3}})["rerank"]
+        self.assertEqual(cfg["top_n"], 5)
+        self.assertAlmostEqual(cfg["blend"], 0.3)
+
+    def test_blend_over_one_is_rejected(self):
+        with self.assertRaises(self.kb.KBError):
+            self.kb._parse_weights({"rerank": {"blend": 2}})
+
+    def test_bad_type_is_rejected(self):
+        with self.assertRaises(self.kb.KBError):
+            self.kb._parse_weights({"rerank": "yes"})
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
