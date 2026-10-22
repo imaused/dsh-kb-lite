@@ -171,6 +171,35 @@ test('kb_search forwards {op:"search"} with clamped top_k and default mode', asy
   }
 })
 
+test('kb_search forwards weights (bm25/dense/rrf_k/boost/recency)', async () => {
+  const transport = makeFakeTransport()
+  const { byName, dispose } = installToolset(transport)
+  try {
+    transport.handler = (request, respond) => {
+      respond({ id: request.id, ok: true, result: { hits: [] } })
+    }
+    const weights = {
+      bm25: 2,
+      dense: 0.5,
+      rrf_k: 40,
+      boost: { 'memory/': 1.3, '_templates/': 0.2 },
+      recency: { half_life_days: 30, min: 0.5 },
+    }
+    const ok = await byName.kb_search.execute({ query: 'x', kb_root: 'C:/kb/root', weights })
+    assert.equal(ok.ok, true)
+    assert.deepEqual(transport.requests[0].params.weights, weights)
+
+    const bad = await byName.kb_search.execute({ query: 'x', weights: { bm25: -1 } })
+    assert.equal(bad.ok, false)
+    assert.match(String(bad.error?.message || ''), /non-negative/)
+
+    const badRecency = await byName.kb_search.execute({ query: 'x', weights: { recency: 'half' } })
+    assert.equal(badRecency.ok, false)
+  } finally {
+    await dispose()
+  }
+})
+
 test('kb_root defaults to KB_LITE_ROOT or ~/.kb-lite and opts.kbRoot overrides both', async () => {
   const saved = process.env.KB_LITE_ROOT
   try {
