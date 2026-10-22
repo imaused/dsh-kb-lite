@@ -76,21 +76,36 @@ params:
 {"kb_root":str,"query":str,"top_k":8,"mode":"auto"}
 ```
 `mode`: `auto`（有 dense 就 hybrid，否则 bm25）| `bm25` | `dense` | `hybrid`。
+可选 `weights`（全部缺省即旧行为）：
+
+```json
+{"bm25":1.0,"dense":1.0,"rrf_k":60,
+ "boost":{"<path 子串>":1.3},
+ "recency":{"half_life_days":30,"min":0.25,"max":1.0}}
+```
+
+- `bm25`/`dense`：两路权重；hybrid 时按**加权 RRF** 融合。
+- `boost`：路径子串 → 乘数，**最长匹配生效**（`{"memory/":1.4,"_templates/":0.2}`）。
+- `recency`：按文档 mtime 衰减 `0.5**(age_days/half_life_days)`，夹在 `[min,max]`。
+
 result:
 ```json
 {"mode_used":"bm25","hits":[
   {"chunk_id":"...","doc_id":"...","path":"...","title":"...",
    "heading":"## 小节","start_line":12,"end_line":28,"page":null,
-   "score":0.83,"matched_by":["bm25"],"snippet":"前 300 字…"}]}
+   "score":28.5,"matched_by":["bm25"],"snippet":"前 300 字…",
+   "score_detail":{"bm25":23.4,"dense":null,"rrf":null,"source_boost":1.4,
+                   "boost_rule":"memory/","recency":0.87,"age_days":6.2,"final":28.5}}]}
 ```
-`score` 降序；`snippet` ≤ 300 字符。
+`score` == `score_detail.final`（排序键）；`score_detail` 解释“凭什么排这个位置”。
 
 ### `ask`
-params: `{"kb_root":str,"query":str,"top_k":5,"max_chars":6000}`
+params: `{"kb_root":str,"query":str,"top_k":5,"max_chars":6000,"weights":{…同上…}}`
 result:
 ```json
 {"evidence":[{"path":"...","title":"...","heading":"...",
-  "start_line":12,"end_line":28,"page":null,"score":0.83,"text":"完整段落（≤ max_chars 预算内）"}],
+  "start_line":12,"end_line":28,"page":null,"score":28.5,
+  "score_detail":{...},"text":"完整段落（≤ max_chars 预算内）"}],
  "total_chars":1234,"mode_used":"hybrid"}
 ```
 `text` 是给模型直接引用的原文，**不改写**。

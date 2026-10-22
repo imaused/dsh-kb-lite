@@ -122,6 +122,31 @@ For a few hundred files, BM25 on its own is usually enough. Dense retrieval earn
 
 **Chunking** matters for citations. Markdown is split at ATX headings, and a section longer than 1200 characters is split further at blank lines or sentence ends with 120 characters of overlap. Plain text is split at blank lines and merged greedily up to 1200 characters with the same overlap. PDF text is taken page by page and split the same way, with `page` counted from 1. Every chunk records `start_line` and `end_line` — line numbers in the original file, or within the page for a PDF — which is what makes `kb_ask` output quotable.
 
+## Ranking weights (0.2.0)
+
+Every hit carries a `score_detail` object, so a ranking is never a black box:
+
+```json
+{"bm25": 23.4, "dense": 0.81, "rrf": 0.032, "source_boost": 1.4,
+ "boost_rule": "memory/", "recency": 0.87, "age_days": 6.2, "final": 28.5}
+```
+
+`bm25` and `dense` are the raw per-retriever scores, `rrf` is the fused rank score, `source_boost` is the path multiplier that matched, `recency` is the time decay, and `final` is what the list is sorted by (`score` equals `final`).
+
+You can supply all four through the optional `weights` parameter on `kb_search` and `kb_ask`:
+
+```json
+{"bm25": 1.0, "dense": 0.6, "rrf_k": 60,
+ "boost": {"memory/": 1.4, "_templates/": 0.2, "kb/README.md": 1.5},
+ "recency": {"half_life_days": 30, "min": 0.25, "max": 1.0}}
+```
+
+- `bm25` / `dense` weight each retriever. In hybrid mode they scale the RRF contributions, which is how you say "trust keywords more than embeddings".
+- `boost` is a path-substring multiplier; the **longest matching pattern wins**, so a file rule beats a directory rule.
+- `recency` decays a document by age: `0.5 ** (age_days / half_life_days)`, clamped to `[min, max]`. Use it when newer notes should outrank older ones — the intended setting for a memory/knowledge folder that keeps growing.
+
+Leave `weights` out and nothing changes; the older ranking is exactly what you get.
+
 ## Storage layout
 
 Everything lives in one directory, `kb_root` (default `~/.kb-lite`, i.e. under your home directory rather than the current working directory — a desktop launch has no dependable cwd):

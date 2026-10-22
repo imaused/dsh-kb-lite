@@ -8,6 +8,7 @@ import { dirname, join } from 'node:path'
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const steps = [
   { name: 'python engine', cmd: 'python', args: ['test/engine_test.py', '-v'], need: 'test/engine_test.py' },
+  { name: 'python weights', cmd: 'python', args: ['test/engine_weights_test.py'], need: 'test/engine_weights_test.py' },
   { name: 'node unit', cmd: process.execPath, args: ['--test', 'test/*.test.mjs'], need: 'test/rpc.test.mjs' },
   { name: 'index smoke', cmd: process.execPath, args: ['test/index.smoke.mjs'], need: 'test/index.smoke.mjs' },
   { name: 'integration (node -> python)', cmd: process.execPath, args: ['test/integration.test.mjs'], need: 'test/integration.test.mjs' },

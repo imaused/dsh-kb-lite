@@ -122,6 +122,31 @@ dsh plugin --profile web add github:imaused/dsh-kb-lite
 
 **分块**决定了引用能不能落地。Markdown 按 ATX 标题切节，单节超过 1200 字符再按空行或句末切，重叠 120 字符。纯文本按空行切分，贪心合并到不超过 1200 字符，重叠同样是 120。PDF 按页取文本，再用同样的规则切，`page` 从 1 开始。每块都记录 `start_line` 和 `end_line`——md/txt 是原文行号，PDF 是该页内的行号——`kb_ask` 的输出之所以能直接引用，靠的就是这两个字段。
 
+## 排序权重（0.2.0）
+
+每个命中都带一个 `score_detail`，排名不再是黑箱：
+
+```json
+{"bm25": 23.4, "dense": 0.81, "rrf": 0.032, "source_boost": 1.4,
+ "boost_rule": "memory/", "recency": 0.87, "age_days": 6.2, "final": 28.5}
+```
+
+`bm25`/`dense` 是两路原始分，`rrf` 是融合后的名次分，`source_boost` 是命中的路径乘数，`recency` 是时间衰减，`final` 是真正用来排序的数（`score` 等于 `final`）。
+
+`kb_search` 和 `kb_ask` 都接受可选参数 `weights`，四项都能调：
+
+```json
+{"bm25": 1.0, "dense": 0.6, "rrf_k": 60,
+ "boost": {"memory/": 1.4, "_templates/": 0.2, "kb/README.md": 1.5},
+ "recency": {"half_life_days": 30, "min": 0.25, "max": 1.0}}
+```
+
+- `bm25` / `dense`：两路各自的权重；hybrid 时按加权 RRF 融合，用来表达"更信关键词还是更信语义"。
+- `boost`：路径子串 → 乘数，**最长匹配生效**，所以文件级规则能压过目录级规则。
+- `recency`：按文档年龄衰减 `0.5 ** (age_days / half_life_days)`，夹在 `[min, max]`。适合"新结论该压过旧结论"的记忆/知识目录。
+
+不传 `weights` 时行为与旧版完全一致。
+
 ## 存储布局
 
 所有东西都在一个目录里，即 `kb_root`（默认 `~/.kb-lite`，也就是放在用户主目录下，而不是当前工作目录——以桌面方式启动时 cwd 并不可靠）：

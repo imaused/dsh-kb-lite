@@ -272,6 +272,116 @@ def _require_query(params: Dict[str, Any]) -> str:
     return query
 
 
+def _round_optional(value: Any, digits: int = 6) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        return round(float(value), digits)
+    except (TypeError, ValueError):
+        return None
+
+
+def _weight_value(value: Any, default: float, minimum: float = 0.0) -> float:
+    """Coerce one weight to a float >= minimum (bad input falls back to default)."""
+    if value is None:
+        return default
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        raise KBError("bad_request", "weights must be numbers, got %r" % (value,))
+    if number != number or number in (float("inf"), float("-inf")):
+        raise KBError("bad_request", "weights must be finite numbers")
+    if number < 0.0:
+        raise KBError("bad_request", "weights must be >= 0, got %r" % (value,))
+    return max(minimum, number)
+
+
+def _boost_rules(raw: Any) -> List[Tuple[str, float]]:
+    """Accept {"substr": mult} or [{"pattern": ..., "mult": ...}] -> [(pattern, mult)]."""
+    if raw is None:
+        return []
+    items: List[Tuple[str, float]] = []
+    if isinstance(raw, dict):
+        for key, mult in raw.items():
+            pattern = str(key).strip()
+            if pattern:
+                items.append((pattern, _weight_value(mult, 1.0, 0.0)))
+    elif isinstance(raw, list):
+        for entry in raw:
+            if not isinstance(entry, dict):
+                raise KBError("bad_request", "weights.boost entries must be objects")
+            pattern = str(entry.get("pattern") or "").strip()
+            if pattern:
+                items.append((pattern, _weight_value(entry.get("mult"), 1.0, 0.0)))
+    else:
+        raise KBError("bad_request", "weights.boost must be an object or a list")
+    return items
+
+
+def _boost_for(path: str, rules: Sequence[Tuple[str, float]]) -> Tuple[float, Optional[str]]:
+    """Longest matching pattern wins; no match -> (1.0, None)."""
+    haystack = (path or "").replace("\\", "/").lower()
+    best_mult, best_pattern = 1.0, None
+    for pattern, mult in rules:
+        needle = pattern.replace("\\", "/").lower()
+        if needle and needle in haystack:
+            if best_pattern is None or len(needle) > len(best_pattern):
+                best_mult, best_pattern = mult, pattern
+    return best_mult, best_pattern
+
+
+def _parse_weights(raw: Any) -> Dict[str, Any]:
+    if raw is None:
+        return {"bm25": 1.0, "dense": 1.0, "rrf_k": float(RRF_K), "boost": [],
+                "recency": None}
+    if not isinstance(raw, dict):
+        raise KBError("bad_request", "params.weights must be an object")
+    return {
+        "bm25": _weight_value(raw.get("bm25"), 1.0),
+        "dense": _weight_value(raw.get("dense"), 1.0),
+        "rrf_k": _weight_value(raw.get("rrf_k"), float(RRF_K), minimum=1.0),
+        "boost": _boost_rules(raw.get("boost")),
+        "recency": _recency_cfg(raw.get("recency")),
+    }
+
+
+def _recency_cfg(raw: Any) -> Optional[Dict[str, float]]:
+    """{"half_life_days": 30, "min": 0.5, "max": 1.0} -> parsed config (or None)."""
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise KBError("bad_request", "weights.recency must be an object")
+    half_life = _weight_value(raw.get("half_life_days"), 30.0, minimum=0.001)
+    floor = _weight_value(raw.get("min"), 0.25)
+    ceiling = _weight_value(raw.get("max"), 1.0)
+    if floor > ceiling:
+        raise KBError("bad_request", "weights.recency.min must be <= max")
+    return {"half_life_days": half_life, "min": floor, "max": ceiling}
+
+
+def _recency_mult(mtime: Any, cfg: Optional[Dict[str, float]],
+                  now: Optional[float] = None) -> Tuple[float, Optional[float]]:
+    """Exponential decay by document age: 0.5 ** (age / half_life), clamped.
+
+    Returns (multiplier, age_days). Records without a usable mtime get (1.0, None).
+    """
+    if cfg is None:
+        return 1.0, None
+    try:
+        stamp = float(mtime)
+    except (TypeError, ValueError):
+        return 1.0, None
+    if stamp <= 0:
+        return 1.0, None
+    current = time.time() if now is None else now
+    age_days = max(0.0, (current - stamp) / 86400.0)
+    mult = 0.5 ** (age_days / max(cfg["half_life_days"], 0.001))
+    mult = min(cfg["max"], max(cfg["min"], mult))
+    return mult, round(age_days, 2)
+
+
+
+
 def _kb_root(params: Dict[str, Any]) -> str:
     root = params.get("kb_root")
     if not isinstance(root, str) or not root.strip():
@@ -1402,7 +1512,12 @@ class KBEngine:
 
     def _retrieve(self, root: str, chunks: Sequence[Dict[str, Any]],
                   manifest: Dict[str, Any], query: str, top_k: int,
-                  mode: str) -> Tuple[List[Tuple[int, float, List[str]]], str]:
+                  mode: str, weights: Optional[Dict[str, Any]] = None
+                  ) -> Tuple[List[Tuple[int, float, List[str], Dict[str, Any]]], str]:
+        weights = weights or {}
+        w_bm25 = _weight_value(weights.get("bm25"), 1.0)
+        w_dense = _weight_value(weights.get("dense"), 1.0)
+        rrf_k = int(_weight_value(weights.get("rrf_k"), float(RRF_K), minimum=1.0))
         bm25_scores = self._bm25_scores(chunks, query)
         candidate_limit = max(top_k * 4, top_k)
         order = sorted(range(len(chunks)), key=lambda index: (-bm25_scores[index], index))
@@ -1461,22 +1576,31 @@ class KBEngine:
             fused: Dict[int, float] = {}
             sources: Dict[int, List[str]] = {}
             for rank_position, index in enumerate(bm25_rank):
-                fused[index] = fused.get(index, 0.0) + 1.0 / (RRF_K + rank_position + 1)
+                fused[index] = fused.get(index, 0.0) + w_bm25 / (rrf_k + rank_position + 1)
                 sources.setdefault(index, []).append("bm25")
             for rank_position, index in enumerate(dense_rank):
-                fused[index] = fused.get(index, 0.0) + 1.0 / (RRF_K + rank_position + 1)
+                fused[index] = fused.get(index, 0.0) + w_dense / (rrf_k + rank_position + 1)
                 sources.setdefault(index, []).append("dense")
             fused_order = sorted(fused.keys(), key=lambda index: (-fused[index], index))
-            ranked = [(index, fused[index], sources[index])
-                      for index in fused_order[:top_k]]
+            ranked = []
+            for index in fused_order[:top_k]:
+                comp = {
+                    "bm25": bm25_scores[index] if bm25_scores[index] > 0.0 else None,
+                    "dense": dense_scores[index] if dense_scores is not None else None,
+                    "rrf": fused[index],
+                }
+                ranked.append((index, fused[index], sources[index], comp))
             return ranked, "hybrid"
 
         if effective == "dense" and dense_scores is not None:
-            ranked = [(index, dense_scores[index], ["dense"])
+            ranked = [(index, dense_scores[index] * w_dense, ["dense"],
+                       {"bm25": bm25_scores[index] if bm25_scores[index] > 0.0 else None,
+                        "dense": dense_scores[index], "rrf": None})
                       for index in dense_rank[:top_k]]
             return ranked, "dense"
 
-        ranked = [(index, bm25_scores[index], ["bm25"])
+        ranked = [(index, bm25_scores[index] * w_bm25, ["bm25"],
+                   {"bm25": bm25_scores[index], "dense": None, "rrf": None})
                   for index in bm25_rank[:top_k]]
         return ranked, "bm25"
 
@@ -1487,10 +1611,16 @@ class KBEngine:
         title = entry.get("title") if isinstance(entry, dict) else ""
         return (path or ""), (title or "")
 
+    @staticmethod
+    def _doc_meta(manifest: Dict[str, Any], doc_id: str) -> Dict[str, Any]:
+        entry = (manifest.get("docs") or {}).get(doc_id) or {}
+        return entry if isinstance(entry, dict) else {}
+
     def _hit(self, chunk: Dict[str, Any], manifest: Dict[str, Any],
-             score: float, matched_by: Sequence[str]) -> Dict[str, Any]:
+             score: float, matched_by: Sequence[str],
+             detail: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         path, title = self._doc_info(manifest, chunk.get("doc_id") or "")
-        return {
+        hit = {
             "chunk_id": chunk.get("chunk_id"),
             "doc_id": chunk.get("doc_id"),
             "path": path,
@@ -1503,11 +1633,30 @@ class KBEngine:
             "matched_by": list(matched_by),
             "snippet": _snippet(chunk.get("text") or ""),
         }
+        if detail is not None:
+            hit["score_detail"] = detail
+        return hit
+
+    @staticmethod
+    def _detail(comp: Dict[str, Any], boost: float, rule: Optional[str],
+                final: float, recency: float = 1.0,
+                age_days: Optional[float] = None) -> Dict[str, Any]:
+        return {
+            "bm25": _round_optional(comp.get("bm25")),
+            "dense": _round_optional(comp.get("dense")),
+            "rrf": _round_optional(comp.get("rrf")),
+            "source_boost": round(float(boost), 4),
+            "boost_rule": rule,
+            "recency": round(float(recency), 4),
+            "age_days": age_days,
+            "final": round(float(final), 6),
+        }
 
     def op_search(self, params: Dict[str, Any]) -> Dict[str, Any]:
         root = _kb_root(params)
         query = _require_query(params)
         top_k = _clamp_int(params.get("top_k"), TOP_K_DEFAULT, 1, TOP_K_MAX)
+        weights = _parse_weights(params.get("weights"))
         mode = params.get("mode", "auto")
         if mode is None:
             mode = "auto"
@@ -1518,11 +1667,23 @@ class KBEngine:
         manifest = self._load_manifest(root)
         if not chunks:
             return {"mode_used": "bm25", "hits": []}
-        ranked, mode_used = self._retrieve(root, chunks, manifest, query, top_k, mode)
-        hits = [self._hit(chunks[index], manifest, score, sources)
-                for index, score, sources in ranked]
+        ranked, mode_used = self._retrieve(root, chunks, manifest, query, top_k,
+                                           mode, weights)
+        hits = []
+        for index, score, sources, comp in ranked:
+            chunk = chunks[index]
+            path, _title = self._doc_info(manifest, chunk.get("doc_id") or "")
+            meta = self._doc_meta(manifest, chunk.get("doc_id") or "")
+            mult, rule = _boost_for(path, weights["boost"])
+            rec, age_days = _recency_mult(meta.get("mtime"), weights["recency"])
+            final = float(score) * mult * rec
+            hits.append(self._hit(chunk, manifest, final, sources,
+                                  self._detail(comp, mult, rule, final, rec, age_days)))
+        hits.sort(key=lambda item: -item["score"])
         log_event(root, "info", "search", query=query[:80], mode=mode_used,
-                  hits=len(hits), top_k=top_k)
+                  hits=len(hits), top_k=top_k,
+                  w_bm25=weights["bm25"], w_dense=weights["dense"],
+                  boost_rules=len(weights["boost"]))
         return {"mode_used": mode_used, "hits": hits}
 
     def op_ask(self, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -1531,6 +1692,7 @@ class KBEngine:
         top_k = _clamp_int(params.get("top_k"), ASK_TOP_K_DEFAULT, 1, TOP_K_MAX)
         budget = _clamp_int(params.get("max_chars"), MAX_CHARS_DEFAULT,
                             MAX_CHARS_MIN, MAX_CHARS_MAX)
+        weights = _parse_weights(params.get("weights"))
         mode = params.get("mode", "auto")
         if mode is None:
             mode = "auto"
@@ -1541,10 +1703,11 @@ class KBEngine:
         manifest = self._load_manifest(root)
         if not chunks:
             return {"evidence": [], "total_chars": 0, "mode_used": "bm25"}
-        ranked, mode_used = self._retrieve(root, chunks, manifest, query, top_k, mode)
+        ranked, mode_used = self._retrieve(root, chunks, manifest, query, top_k,
+                                           mode, weights)
         evidence: List[Dict[str, Any]] = []
         used = 0
-        for index, score, _sources in ranked:
+        for index, score, _sources, comp in ranked:
             remaining = budget - used
             if remaining <= 0:
                 break
@@ -1557,6 +1720,10 @@ class KBEngine:
                 if not text.strip():
                     continue
             path, title = self._doc_info(manifest, chunk.get("doc_id") or "")
+            meta = self._doc_meta(manifest, chunk.get("doc_id") or "")
+            mult, rule = _boost_for(path, weights["boost"])
+            rec, age_days = _recency_mult(meta.get("mtime"), weights["recency"])
+            final = float(score) * mult * rec
             evidence.append({
                 "path": path,
                 "title": title,
@@ -1564,7 +1731,8 @@ class KBEngine:
                 "start_line": chunk.get("start_line"),
                 "end_line": chunk.get("end_line"),
                 "page": chunk.get("page"),
-                "score": round(float(score), 6),
+                "score": round(final, 6),
+                "score_detail": self._detail(comp, mult, rule, final, rec, age_days),
                 "text": text,
             })
             used += len(text)
