@@ -114,6 +114,8 @@ Set the environment variables before starting DSH, not from inside a session.
 
 **Dense.** When `numpy` is importable and `sentence-transformers` loads, the engine embeds chunks with `BAAI/bge-small-zh-v1.5` (configurable through `KB_LITE_MODEL`) and prepends the retrieval instruction `为这个句子生成表示以用于检索相关文章：` to queries, which is the convention that model was trained with. Dense retrieval finds paraphrases that share no words with the source. Vectors are produced during ingest, so an index built before you installed the extras has none — install them and re-ingest (with `force: true`, or after `kb_clear`) to get dense results on it.
 
+The engine **never downloads a model as a side effect of a search**: it runs with `HF_HUB_OFFLINE=1` unless you set `KB_LITE_ALLOW_DOWNLOAD=1`. Point `KB_LITE_MODEL` at a local directory (a ModelScope download works — see `tools/fetch-model-modelscope.mjs`) and dense retrieval works offline.
+
 **Hybrid.** Reciprocal rank fusion, `k = 60`: each retriever contributes its top `top_k * 4` candidates and the fused score decides the order. `matched_by` on each hit records whether BM25, dense, or both found it.
 
 `mode: "auto"` uses hybrid when dense is available and BM25 otherwise, and every result reports `mode_used`, so you never have to guess which one ran. The explicit modes degrade the same way: `dense` or `hybrid` on a machine without the stack, or on an index with no vectors, falls back to BM25 rather than failing, and says so in `mode_used`. `kb_ask` has no `mode` parameter; it picks the same way and reports `mode_used`.

@@ -55,6 +55,13 @@ BM25_B = 0.75
 BGE_QUERY_PREFIX = "为这个句子生成表示以用于检索相关文章："
 DENSE_MODEL = os.environ.get("KB_LITE_MODEL") or "BAAI/bge-small-zh-v1.5"
 
+# Never let a tool call sit on a Hugging Face download: offline by default, opt in
+# with KB_LITE_ALLOW_DOWNLOAD=1. A local model directory (KB_LITE_MODEL) works either way.
+if (os.environ.get("KB_LITE_ALLOW_DOWNLOAD") or "").strip() not in ("1", "true", "yes", "on"):
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+    os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+
 # --- on-disk layout -------------------------------------------------------
 MANIFEST_NAME = "manifest.json"
 CHUNKS_NAME = "chunks.jsonl"

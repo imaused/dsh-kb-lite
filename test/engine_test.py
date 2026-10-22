@@ -798,7 +798,7 @@ class EncodingTests(unittest.TestCase):
         lines = [json.dumps(request, ensure_ascii=False) for request in requests]
         # Deliberately empty: the engine must force UTF-8 on its own.
         parsed, stdout, stderr, returncode = run_engine(
-            lines, env_extra={"PYTHONIOENCODING": ""})
+            lines, env_extra={"PYTHONIOENCODING": "", "KB_LITE_DENSE": "0"})
         self.assertEqual(returncode, 0, stderr)
         self.assertEqual(len(parsed), len(lines) + 1)
         self.assertEqual(parsed[0]["backend"], "none")

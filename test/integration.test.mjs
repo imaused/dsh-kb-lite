@@ -48,7 +48,7 @@ function makeCorpus() {
 }
 
 test('rpc: ping + stats against the real engine', async () => {
-  const t = createChildProcessTransport({ argv: ['python', ENGINE], cwd: ROOT })
+  const t = createChildProcessTransport({ argv: ['python', ENGINE], cwd: ROOT, env: { ...process.env, KB_LITE_DENSE: '0' } })
   const client = createEngineClient({ transport: t, timeoutMs: 30000 })
   try {
     const ping = await client.request('ping', {})
@@ -64,7 +64,7 @@ test('rpc: ping + stats against the real engine', async () => {
 test('end-to-end: ingest -> search -> ask -> clear via the engine client', async () => {
   const { base, docs } = makeCorpus()
   const kbRoot = join(base, '.kb-lite')
-  const t = createChildProcessTransport({ argv: ['python', ENGINE], cwd: ROOT })
+  const t = createChildProcessTransport({ argv: ['python', ENGINE], cwd: ROOT, env: { ...process.env, KB_LITE_DENSE: '0' } })
   const client = createEngineClient({ transport: t, timeoutMs: 120000 })
   try {
     const ing = await client.request('ingest', { kb_root: kbRoot, paths: [docs] })
