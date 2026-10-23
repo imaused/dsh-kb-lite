@@ -1,6 +1,6 @@
 {
   "name": "dsh-kb-lite",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Local knowledge base for DeepSeek Harness: ingest Markdown/TXT/PDF, hybrid BM25 + optional dense retrieval, explainable ranking weights (bm25/dense/RRF/source boost/recency), cited answers. Host-only plugin, five tools, no network.",
   "type": "module",
   "main": "lib/index.js",

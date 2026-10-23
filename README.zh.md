@@ -19,7 +19,7 @@ MIT。宿主侧插件，五个工具，没有浏览器界面，引擎不打开�
 - 五个工具：`kb_ingest`、`kb_search`、`kb_ask`、`kb_stats`、`kb_clear`。
 - 没有浏览器界面，也没有客户端包。`package.json` 里刻意不写 `dsh.client` 字段：插件只加宿主侧工具，所以 DSH 改客户端 API 时弄不坏已经装好的副本。这一点重要，因为客户端那一半一旦坏了会把整个 Web 界面一起带下去——DSH 的启动是全或无。
 - 输入：`.md`、`.markdown`、`.txt`、`.pdf`。PDF 需要 `pymupdf`；没有时每个 PDF 作为逐文件错误返回，批次其余文件照常入库。其它扩展名不读：目录遍历会跳过，显式点名的文件会以 `unsupported_extension` 报错。
-- 支持递归目录——隐藏目录以及 `.git`、`node_modules`、`.venv`、`__pycache__` 一类的目录会跳过。按 `sha256` 增量：未变化的文件跳过，内容变化的重新索引，`force: true` 无条件重解析。
+- 支持递归目录——隐藏目录以及 `.git`、`node_modules`、`.venv`、`__pycache__` 一类的目录会跳过。按 `sha256` 增量：未变化的文件跳过，内容变化的重新索引，`force: true` 无条件重解析。`prune: true` 会删除"文件已不存在、且位于本次路径范围内"的文档。
 - `max_files` 限制单次调用处理的文件数；超出的部分作为 `pending` 返回，下次调用接着做。
 - BM25 不依赖任何第三方库，含汉字二元组分词。
 - 可选的稠密检索走 `sentence-transformers` 和 `BAAI/bge-small-zh-v1.5`；`hybrid` 用倒数排名融合（RRF）合并两路结果。
@@ -47,7 +47,7 @@ dsh plugin --profile web add github:imaused/dsh-kb-lite
 
 | 工具 | 做什么 | 参数 |
 | --- | --- | --- |
-| `kb_ingest` | 索引文件或目录 | `paths`、`recursive`、`force`、`max_files`、`with_embeddings`、`kb_root` |
+| `kb_ingest` | 索引文件或目录 | `paths`、`recursive`、`force`、`prune`、`max_files`、`with_embeddings`、`kb_root` |
 | `kb_search` | 返回带片段的打分结果 | `query`、`top_k`、`mode`（`auto`、`bm25`、`dense`、`hybrid`）、`kb_root` |
 | `kb_ask` | 在字符预算内返回可供模型引用的原文段落 | `query`、`top_k`、`max_chars`、`kb_root` |
 | `kb_stats` | 文档数、块数、`kb_root`、占用大小、`updated_at`，最多 50 条已索引路径 | `kb_root` |
@@ -55,7 +55,7 @@ dsh plugin --profile web add github:imaused/dsh-kb-lite
 
 每个工具都接受可选的 `kb_root`，只对本次调用生效。传给 `kb_ingest` 的路径必须是绝对路径。
 
-默认值：`recursive: true`、`force: false`、`max_files: 50`（限制在 1–500）、`with_embeddings: "auto"`，`kb_search` 的 `top_k` 默认 8、`kb_ask` 默认 5（都限制在 1–50），`max_chars` 默认 6000。`with_embeddings` 接受 `"auto"`（有稠密依赖时算向量）、`"on"` 和 `"off"`；只想用 BM25 时传 `"off"` 可以跳过这次入库的向量计算。
+默认值：`recursive: true`、`force: false`、`prune: false`、`max_files: 50`（限制在 1–500）、`with_embeddings: "auto"`，`kb_search` 的 `top_k` 默认 8、`kb_ask` 默认 5（都限制在 1–50），`max_chars` 默认 6000。`with_embeddings` 接受 `"auto"`（有稠密依赖时算向量）、`"on"` 和 `"off"`；只想用 BM25 时传 `"off"` 可以跳过这次入库的向量计算。
 
 ## 快速开始
 
@@ -202,7 +202,7 @@ kb_root/
 
 ## 状态
 
-版本 0.4.1。在 Windows 11、DSH 0.2.0-rc.2、Node 24、Python 3.14 上测过。Linux 与 macOS 未测试。
+版本 0.4.2。在 Windows 11、DSH 0.2.0-rc.2、Node 24、Python 3.14 上测过。Linux 与 macOS 未测试。
 
 这个插件怎么提交到插件列表，写在 [docs/submission.md](docs/submission.md) 里。
 

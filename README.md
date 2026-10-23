@@ -19,7 +19,7 @@ The scope is deliberately smaller than a full RAG stack: five tools, one local i
 - Five tools: `kb_ingest`, `kb_search`, `kb_ask`, `kb_stats`, `kb_clear`.
 - No browser UI and no client bundle. `package.json` deliberately has no `dsh.client` field: the plugin only adds host tools, so a DSH release that changes client APIs cannot break an installed copy. That matters because a broken client half takes the whole web UI down with it — DSH starts all-or-nothing.
 - Input: `.md`, `.markdown`, `.txt`, `.pdf`. PDF needs `pymupdf`; without it each PDF shows up as a per-file error and the rest of the batch still indexes. Other extensions are not read: a directory walk skips them, and a file you name explicitly is reported as `unsupported_extension`.
-- Recursive directory ingest — hidden directories and `.git`, `node_modules`, `.venv`, `__pycache__` and similar are skipped. Incremental by `sha256`: unchanged files are skipped, changed files are re-indexed, `force: true` re-parses regardless.
+- Recursive directory ingest — hidden directories and `.git`, `node_modules`, `.venv`, `__pycache__` and similar are skipped. Incremental by `sha256`: unchanged files are skipped, changed files are re-indexed, `force: true` re-parses regardless. `prune: true` drops documents whose files no longer exist under the paths you pass.
 - `max_files` caps one call; anything over the cap is returned as `pending` so the next call can pick it up.
 - BM25 with no third-party dependency, including CJK bigram tokenisation.
 - Optional dense retrieval through `sentence-transformers` and `BAAI/bge-small-zh-v1.5`, and `hybrid` mode that fuses both with reciprocal rank fusion (RRF).
@@ -47,7 +47,7 @@ After it installs, restart DSH and open a **new** session. Tools are bound when 
 
 | Tool | What it does | Parameters |
 | --- | --- | --- |
-| `kb_ingest` | Index files or directories | `paths`, `recursive`, `force`, `max_files`, `with_embeddings`, `kb_root` |
+| `kb_ingest` | Index files or directories | `paths`, `recursive`, `force`, `prune`, `max_files`, `with_embeddings`, `kb_root` |
 | `kb_search` | Return scored chunks with snippets | `query`, `top_k`, `mode` (`auto`, `bm25`, `dense`, `hybrid`), `kb_root` |
 | `kb_ask` | Return verbatim passages for the model to cite, within a character budget | `query`, `top_k`, `max_chars`, `kb_root` |
 | `kb_stats` | Document and chunk counts, `kb_root`, size, `updated_at`, up to 50 indexed paths | `kb_root` |
@@ -55,7 +55,7 @@ After it installs, restart DSH and open a **new** session. Tools are bound when 
 
 `kb_root` is accepted by every tool and applies to that call only. Paths passed to `kb_ingest` must be absolute.
 
-Defaults: `recursive: true`, `force: false`, `max_files: 50` (clamped to 1–500), `with_embeddings: "auto"`, `top_k: 8` for `kb_search` and `5` for `kb_ask` (both clamped to 1–50), `max_chars: 6000`. `with_embeddings` accepts `"auto"` (embed when the dense stack is available), `"on"` and `"off"`; `"off"` skips vector work for that ingest when you only want BM25.
+Defaults: `recursive: true`, `force: false`, `prune: false`, `max_files: 50` (clamped to 1–500), `with_embeddings: "auto"`, `top_k: 8` for `kb_search` and `5` for `kb_ask` (both clamped to 1–50), `max_chars: 6000`. `with_embeddings` accepts `"auto"` (embed when the dense stack is available), `"on"` and `"off"`; `"off"` skips vector work for that ingest when you only want BM25.
 
 ## Quick start
 
@@ -158,6 +158,7 @@ kb_root/
   manifest.json    # {version, docs: {<doc_id>: {path, sha256, mtime, size, title, kind, pages, chunks}}, updated_at}
   chunks.jsonl     # one JSON object per line: {chunk_id, doc_id, ordinal, heading, start_line, end_line, page, text}
   vectors.npy      # optional; row order matches chunks.jsonl; float32
+  vectors.meta.json # vector fingerprint {model, dim, count, built_at}; stale vectors are ignored
   vectors.json     # fallback when numpy is absent; one of the two, never both
   engine.log       # engine log; the engine's stderr is mirrored here
 ```
@@ -203,7 +204,7 @@ One caveat, because it is easy to get wrong: if you install the optional dense s
 
 ## Status
 
-Version 0.4.1. Tested on Windows 11 with DSH 0.2.0-rc.2, Node 24 and Python 3.14. Linux and macOS are untested.
+Version 0.4.2. Tested on Windows 11 with DSH 0.2.0-rc.2, Node 24 and Python 3.14. Linux and macOS are untested.
 
 How this plugin is submitted to the plugin list is written up in [docs/submission.md](docs/submission.md).
 

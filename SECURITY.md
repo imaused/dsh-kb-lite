@@ -1,6 +1,6 @@
 # Security model
 
-This describes version 0.4.1 of `dsh-kb-lite`: one host-only DSH plugin, five tools, one short-lived Python probe, one long-lived Python process. Every claim below is written so that you can check it against the files in this repository, and the commands to do that are at the end.
+This describes version 0.4.2 of `dsh-kb-lite`: one host-only DSH plugin, five tools, one short-lived Python probe, one long-lived Python process. Every claim below is written so that you can check it against the files in this repository, and the commands to do that are at the end.
 
 Nothing here is a request for trust. If a line in this document and a line in the code disagree, the code is what runs.
 
@@ -73,7 +73,7 @@ const result = spawnSync(
 ## What it reads
 
 - **The files you pass to `kb_ingest`.** Paths must be absolute. A file is read only if its extension is `.md`, `.markdown`, `.txt` or `.pdf`. A directory is walked to find those extensions; hidden directories and `.git`, `.hg`, `.svn`, `node_modules`, `__pycache__`, `.venv`, `venv`, `.tox`, `.idea`, `.vscode` and similar are skipped, and the contents of unsupported files are not read.
-- **Its own `kb_root`.** `manifest.json`, `chunks.jsonl`, and `vectors.npy` / `vectors.json` if present, plus `engine.log`.
+- **Its own `kb_root`.** `manifest.json`, `chunks.jsonl`, and `vectors.npy` / `vectors.json` / `vectors.meta.json` if present, plus `engine.log`.
 - **Its own package files.** `engine/kb_engine.py` is what Python loads.
 
 Nothing else. It does not read DSH configuration, credentials, browser data, shell history, or your home directory generally. The `paths` argument is the entire input surface, and it is checked for absoluteness before anything is opened.
@@ -87,11 +87,12 @@ Only inside `kb_root`:
 | `manifest.json` | Per-document metadata: path, `sha256`, mtime, size, title, kind, page count, chunk count. |
 | `chunks.jsonl` | One JSON object per chunk, including the chunk's **full text**. |
 | `vectors.npy` or `vectors.json` | Optional embeddings, when the dense stack is available. |
+| `vectors.meta.json` | The vector fingerprint: model name, width, row count, build time. |
 | `engine.log` | Engine log lines; the engine's stderr is mirrored here. |
 
-Writes are atomic: the engine writes a temporary `<name>.tmp.<pid>` file inside `kb_root` and renames it into place, so a crash mid-write cannot leave a half-written index. The index files — `manifest.json`, `chunks.jsonl`, `vectors.npy`, `vectors.json` — are produced by `_child(root, name)`, which resolves the real path and raises `path_escape` if it would land outside `kb_root`; `engine.log` is a fixed name appended to the root. None of these names comes from user input.
+Writes are atomic: the engine writes a temporary `<name>.tmp.<pid>` file inside `kb_root` and renames it into place, so a crash mid-write cannot leave a half-written index. The index files — `manifest.json`, `chunks.jsonl`, `vectors.npy`, `vectors.json`, `vectors.meta.json` — are produced by `_child(root, name)`, which resolves the real path and raises `path_escape` if it would land outside `kb_root`; `engine.log` is a fixed name appended to the root. None of these names comes from user input.
 
-`kb_root` is created if it does not exist. `kb_clear` deletes the index files there (`manifest.json`, `chunks.jsonl`, both vector files); your source documents are never touched, and `engine.log` is left in place. The plugin writes nothing outside `kb_root`.
+`kb_root` is created if it does not exist. `kb_clear` deletes the index files there (`manifest.json`, `chunks.jsonl`, the vector files including `vectors.meta.json`); your source documents are never touched, and `engine.log` is left in place. The plugin writes nothing outside `kb_root`.
 
 Two consequences worth stating plainly:
 
@@ -174,7 +175,7 @@ Every module named should be from the Python standard library, or one of the thr
 echo '{"id":"1","op":"ping","params":{}}' | python engine/kb_engine.py
 ```
 
-Expect a `ready` line, then `{"id":"1","ok":true,"result":{"pong":true,"version":"0.1.0",...}}` (that `version` is the engine version; the npm package version is 0.4.1). No arguments, no configuration, no network.
+Expect a `ready` line, then `{"id":"1","ok":true,"result":{"pong":true,"version":"0.1.0",...}}` (that `version` is the engine version; the npm package version is 0.4.2). No arguments, no configuration, no network.
 
 **6. Confirm the write guard exists.**
 
@@ -225,7 +226,7 @@ Expect no rows while queries and ingests are running. Do this with the dense mod
 Get-ChildItem -Force (Join-Path $env:USERPROFILE '.kb-lite')
 ```
 
-Expect `manifest.json`, `chunks.jsonl`, `engine.log`, and `vectors.npy` only if dense is enabled. Nothing else should appear, and nothing outside that directory should change.
+Expect `manifest.json`, `chunks.jsonl`, `engine.log`, and `vectors.npy` / `vectors.meta.json` only if dense is enabled. Nothing else should appear, and nothing outside that directory should change.
 
 **10. Confirm there is no install script and no runtime dependency.**
 
