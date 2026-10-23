@@ -204,7 +204,7 @@ One caveat, because it is easy to get wrong: if you install the optional dense s
 
 ## Status
 
-Version 0.4.2. Tested on Windows 11 with DSH 0.2.0-rc.2, Node 24 and Python 3.14. Linux and macOS are untested.
+Version 0.4.3. Tested on Windows 11 with DSH 0.2.0-rc.2, Node 24 and Python 3.14. Linux and macOS are untested.
 
 How this plugin is submitted to the plugin list is written up in [docs/submission.md](docs/submission.md).
 

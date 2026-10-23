@@ -1,7 +1,7 @@
 {
   "name": "dsh-kb-lite",
-  "version": "0.4.2",
-  "description": "Local knowledge base for DeepSeek Harness: ingest Markdown/TXT/PDF, hybrid BM25 + optional dense retrieval, explainable ranking weights (bm25/dense/RRF/source boost/recency), cited answers. Host-only plugin, five tools, no network.",
+  "version": "0.4.3",
+  "description": "Local knowledge base for DeepSeek Harness: five host-only tools to ingest Markdown, plain text and PDF, retrieve passages with BM25 or hybrid BM25 plus optional local embeddings, and return cited file/line sources. Offline by default; Node.js 18+ and Python 3.9+ are required, and PDF ingest needs pymupdf.",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
