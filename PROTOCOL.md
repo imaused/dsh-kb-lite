@@ -42,32 +42,46 @@ Python 进程启动后立刻输出一行 ready（stdout），然后进入读循�
 
 ### `ping`
 params: 无
-result: `{"pong":true,"version":"0.1.0","dense":bool,"numpy":bool}`
+result: `{"pong":true,"version":"0.1.0","dense":bool,"dense_loaded":bool,"numpy":bool}`
+
+### `warmup`
+params: `{"wait":true}`
+加载 embedding 模型；`wait:false` 只启动后台线程并立即返回。`KB_LITE_LAZY_DENSE=1` 时，
+`search` 的 `auto` 模式首次命中会自动触发后台预热（本次先用 BM25 返回）。
+result: `{"ok":true,"dense":true,"loaded":true,"loading":false,"model":"...","elapsed_ms":14562}`；
+dense 不可用时 `ok:false` + `reason`。
 
 ### `stats`
 params: `{"kb_root":str}`
 result:
 ```json
 {"docs":0,"chunks":0,"dense":false,"dense_model":null,
- "kb_root":"...","bytes":0,"updated_at":null,"paths":[]}
+ "dense_loaded":false,"dense_loading":false,"dense_lazy":false,
+ "kb_root":"...","bytes":0,"updated_at":null,
+ "vectors":{"count":0,"dim":512,"model":"...","built_at":"..."},
+ "paths":[]}
 ```
-`paths` 最多列 50 条文档路径（给 agent 看库里有啥）。
+`vectors` 是 `vectors.meta.json` 的摘要，没有向量时为 `null`；`paths` 最多列 50 条文档路径（给 agent 看库里有啥）。
 
 ### `ingest`
 params:
 ```json
-{"kb_root":str,"paths":[str],"recursive":true,"force":false,
+{"kb_root":str,"paths":[str],"recursive":true,"force":false,"prune":false,
  "max_files":50,"with_embeddings":"auto"}
 ```
 - `paths` 可含文件或目录（目录按 `recursive` 展开）。
 - 支持扩展名：`.md .markdown .txt .pdf`（`.pdf` 需 pymupdf，没有则逐文件报错，不整体失败）。
 - 去重：同 `sha256` 且 `mtime+size` 未变 → `skipped`；内容变了 → `updated`。
 - `force:true` 忽略增量判断，重解析重索引。
+- `prune:true`：删除索引中"文件已不存在、且位于本次 `paths` 扫描范围内"的文档；范围外的老文档不动。
+- `with_embeddings:"off"` 时不触发嵌入；`"on"` 时即使没有文档变化也会补齐缺失向量。
 - 单次最多处理 `max_files` 个文件，超出部分放进 `pending` 返回。
 result:
 ```json
-{"added":0,"updated":0,"skipped":0,"errors":[{"path":"...","code":"...","message":"..."}],
- "pending":0,"docs":[{"path":"...","chunks":3}],"elapsed_ms":12}
+{"added":0,"updated":0,"skipped":0,"removed":0,
+ "errors":[{"path":"...","code":"...","message":"..."}],
+ "pending":0,"docs":[{"path":"...","chunks":3}],
+ "removed_paths":["..."],"elapsed_ms":12}
 ```
 
 ### `search`
@@ -75,7 +89,7 @@ params:
 ```json
 {"kb_root":str,"query":str,"top_k":8,"mode":"auto"}
 ```
-`mode`: `auto`（有 dense 就 hybrid，否则 bm25）| `bm25` | `dense` | `hybrid`。
+`mode`: `auto`（有 dense 就 hybrid，否则 bm25；`KB_LITE_LAZY_DENSE=1` 且模型尚未加载时先返回 bm25 并后台预热）| `bm25` | `dense` | `hybrid`。
 可选 `weights`（全部缺省即旧行为）：
 
 ```json
@@ -121,6 +135,7 @@ kb_root/
   manifest.json      # {version:1, docs:{<doc_id>:{path,sha256,mtime,size,title,kind,pages,chunks}}, updated_at}
   chunks.jsonl       # 每行 {chunk_id,doc_id,ordinal,heading,start_line,end_line,page,text}
   vectors.npy        # 可选；行序 == chunks.jsonl 行序；float32
+  vectors.meta.json  # 向量指纹 {model,dim,count,built_at}；模型/维度不符时旧向量自动失效
   vectors.json       # 没有 numpy 时的降级存储（列表的列表），与 .npy 二选一
   engine.log         # 引擎日志（stderr 也镜像一份，便于排错）
 ```

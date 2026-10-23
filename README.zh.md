@@ -112,13 +112,13 @@ dsh plugin --profile web add github:imaused/dsh-kb-lite
 
 **BM25。** 纯 Python 实现，不用任何库。分词是拉丁词（转小写，`[a-z0-9_]+`）加汉字二元组（相邻两字），再加单字兜底，参数为 `k1 = 1.2`、`b = 0.75`。这是永远可用的模式：什么都没装，BM25 仍然是一套完整的、带排序的关键词检索。
 
-**稠密检索。** 当 `numpy` 可导入、`sentence-transformers` 能加载时，引擎用 `BAAI/bge-small-zh-v1.5`（可用 `KB_LITE_MODEL` 改）给块算向量，并在查询侧加上该模型训练时用的指令前缀 `为这个句子生成表示以用于检索相关文章：`。稠密检索能找到与原文不共用一个词的改写问法。向量是在入库时算的，所以在装这些可选依赖之前建的索引没有向量——装好之后重新入库（`force: true`，或者先 `kb_clear`）才会有稠密结果。
+**稠密检索。** 当 `numpy` 可导入、`sentence-transformers` 能加载时，引擎用 `BAAI/bge-small-zh-v1.5`（可用 `KB_LITE_MODEL` 改）给块算向量，并在查询侧加上该模型训练时用的指令前缀 `为这个句子生成表示以用于检索相关文章：`。稠密检索能找到与原文不共用一个词的改写问法。向量是在入库时算的，所以在装这些可选依赖之前建的索引没有向量——装好之后用 `with_embeddings: "on"` 重新入库即可补齐（没有文档变化也会补），或者 `force: true` / 先 `kb_clear`。
 
 **混合检索。** 倒数排名融合，`k = 60`：两路各取 `top_k * 4` 个候选，按融合分排序。每条命中的 `matched_by` 记录它是被 BM25、稠密检索还是两者一起找到的。
 
-`mode: "auto"` 在有稠密时走 hybrid，否则走 bm25，每条结果都带 `mode_used`，不用猜实际跑的是哪条路。显式模式也按同样方式降级：机器上没有那套依赖，或者索引里没有向量时，`dense` 或 `hybrid` 会退回 BM25 而不是报错，并在 `mode_used` 里说明。`kb_ask` 没有 `mode` 参数，选择方式相同，也会报 `mode_used`。
+`mode: "auto"` 在有稠密时走 hybrid，否则走 bm25，每条结果都带 `mode_used`，不用猜实际跑的是哪条路。插件会话里（`KB_LITE_LAZY_DENSE=1`）模型尚未加载时，`auto` 首查先用 BM25 返回，模型在后台加载，完成后自动升级 hybrid；显式 `dense`/`hybrid` 仍会等待加载。显式模式也按同样方式降级：机器上没有那套依赖，或者索引里没有向量时，`dense` 或 `hybrid` 会退回 BM25 而不是报错，并在 `mode_used` 里说明。`kb_ask` 没有 `mode` 参数，选择方式相同，也会报 `mode_used`。
 
-实测（2026-10-23，45 篇 / 334 块，18 条查询）：BM25 的 MRR 0.844、Recall@3 89%；稠密 0.861、**Recall@3 100%**；hybrid 0.872、94%。所以**即使只有 45 篇，稠密也值得装**——差距正好落在 BM25 看不见的换说法查询上（问「插件把界面搞坏」，原文只写「客户端注入」）。代价是延迟：CPU 上 BM25 约 70ms，稠密约 900ms（模型一次性加载之后）。同一个集合上**重排实测更差**（0.756）：cross-encoder 会把"哪儿都提到关键词"的索引类文档顶上来；`weights.rerank` 保留但默认关闭。要判断自己的语料，同一个查询跑两遍——`mode: "bm25"` 和 `mode: "hybrid"`——对比命中即可。
+实测（2026-10-23，45 篇 / 334 块，18 条查询）：BM25 的 MRR 0.844、Recall@3 89%；稠密 0.861、**Recall@3 100%**；hybrid 0.872、94%。所以**即使只有 45 篇，稠密也值得装**——差距正好落在 BM25 看不见的换说法查询上（问「插件把界面搞坏」，原文只写「客户端注入」）。真正的代价是首次加载模型约 14s：模型热起来后，同一台机器实测 BM25 约 53ms、稠密约 77ms（358 块、6 条查询中位数；旧版写的约 900ms 是把首查 14s 摊进 18 条查询的均值）。同一个集合上**重排实测更差**（0.756）：cross-encoder 会把"哪儿都提到关键词"的索引类文档顶上来；`weights.rerank` 保留但默认关闭。要判断自己的语料，同一个查询跑两遍——`mode: "bm25"` 和 `mode: "hybrid"`——对比命中即可。
 
 **分块**决定了引用能不能落地。Markdown 按 ATX 标题切节，单节超过 1200 字符再按空行或句末切，重叠 120 字符。纯文本按空行切分，贪心合并到不超过 1200 字符，重叠同样是 120。PDF 按页取文本，再用同样的规则切，`page` 从 1 开始。每块都记录 `start_line` 和 `end_line`——md/txt 是原文行号，PDF 是该页内的行号——`kb_ask` 的输出之所以能直接引用，靠的就是这两个字段。
 
@@ -156,13 +156,14 @@ kb_root/
   manifest.json    # {version, docs: {<doc_id>: {path, sha256, mtime, size, title, kind, pages, chunks}}, updated_at}
   chunks.jsonl     # 每行一个 JSON：{chunk_id, doc_id, ordinal, heading, start_line, end_line, page, text}
   vectors.npy      # 可选；行序与 chunks.jsonl 一致；float32
+  vectors.meta.json # 向量指纹 {model, dim, count, built_at}；模型/维度不符时旧向量自动失效
   vectors.json     # 没有 numpy 时的降级存储；与 .npy 二选一，不会同时存在
   engine.log       # 引擎日志；引擎的 stderr 也镜像到这里
 ```
 
 `doc_id` = 规范化路径 sha1 的前 16 位；`chunk_id` = `<doc_id>:<ordinal>`。`manifest.json` 和 `chunks.jsonl` 都是纯文本——可以直接读、直接 diff，也可以拿来核对到底入库了什么。
 
-索引是派生数据。要重置就删掉 `kb_root` 再重新入库，不要手改这些文件；`kb_clear` 就是替你删。改了 `KB_LITE_MODEL` 之后，已存的向量来自旧模型，应当重建（`kb_clear`，再入库）。
+索引是派生数据。要重置就删掉 `kb_root` 再重新入库，不要手改这些文件；`kb_clear` 就是替你删。`vectors.meta.json` 记录模型名与维度：改了 `KB_LITE_MODEL` 之后旧向量会被忽略（稠密退回 BM25），直到你用 `kb-build-dense --full` 或 `kb_clear` + 入库重新算一遍。
 
 ## 环境要求
 
@@ -181,7 +182,7 @@ kb_root/
 - **不处理 DOI，也不生成可点击的引用。** PDF 里的 DOI 就是普通文本。`kb_ask` 给你 path、行号和页码，不是一个能点开的文献链接。
 - **不能导入 Zotero（或任何文献管理库）。** 入口只有磁盘上的文件，把 `kb_ingest` 指过去。
 - **没有 OCR。** 扫描版 PDF 没有文本层，抽不出任何东西。先自己做 OCR，再入库文本。
-- **向量文件整体重写，不做增量更新。** 每次入库都会按新的块列表重写 `vectors.npy`/`vectors.json`；未变化的块复用已有向量，但没有追加写，也没有后台压缩。
+- **向量文件整体重写，但入库是增量的。** 每次入库都会按新的块列表重写 `vectors.npy`/`vectors.json`；未变化的块按内容哈希复用已有向量，只重算改动文档的块；没有追加写，也没有后台压缩。
 - **BM25 索引是每次查询时重建的，不做缓存。** 目标规模（几百个文件、几千个块）下没问题，换来的是磁盘格式足够简单；它不是为十万级块设计的。本机实测：25 个块的语料查询在毫秒级返回，代价随语料增长，而不是随查询增长。
 - **块大小固定。** 1200 字符、重叠 120，没有单次调用或单文件的覆盖开关。
 - **只认四种扩展名。** `.md`、`.markdown`、`.txt`、`.pdf`。DOCX、HTML、EPUB 不读。

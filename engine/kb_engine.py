@@ -28,6 +28,7 @@ import math
 import os
 import re
 import sys
+import threading
 import time
 import traceback
 from collections import Counter
@@ -71,6 +72,7 @@ MANIFEST_NAME = "manifest.json"
 CHUNKS_NAME = "chunks.jsonl"
 VECTORS_NPY = "vectors.npy"
 VECTORS_JSON = "vectors.json"
+VECTORS_META = "vectors.meta.json"
 LOG_NAME = "engine.log"
 
 SUPPORTED_EXTS = (".md", ".markdown", ".txt", ".pdf")
@@ -820,9 +822,17 @@ def _snippet(text: str, limit: int = SNIPPET_CHARS) -> str:
 # optional dense backend
 # --------------------------------------------------------------------------
 class DenseBackend:
-    """Lazy sentence-transformers backend; ``capable`` is an import probe only."""
+    """Lazy sentence-transformers backend; ``capable`` is an import probe only.
+
+    Loading the model costs ~14 s on CPU, so ``start_warmup`` can load it in a
+    daemon thread while BM25 keeps serving.  ``ensure_loaded`` stays blocking
+    and joins an in-flight warm-up; ``is_loaded`` / ``loading`` are cheap probes
+    used by the lazy ``auto`` mode.
+    """
 
     backend_kind = "sentence-transformers"
+    lazy = (os.environ.get("KB_LITE_LAZY_DENSE") or "").strip().lower() in (
+        "1", "true", "yes", "on")
 
     def __init__(self, model_name: Optional[str] = None) -> None:
         self.model_name = model_name or os.environ.get("KB_LITE_MODEL") or DENSE_MODEL
@@ -830,36 +840,77 @@ class DenseBackend:
         self._numpy = None
         self._load_attempted = False
         self._load_error: Optional[str] = None
+        self._load_lock = threading.Lock()
+        self._warmup_thread: Optional[Any] = None
 
     @property
     def capable(self) -> bool:
         return _module_present("numpy") and _module_present("sentence_transformers")
 
+    @property
+    def is_loaded(self) -> bool:
+        return self._model is not None
+
+    @property
+    def loading(self) -> bool:
+        thread = self._warmup_thread
+        return bool(thread is not None and thread.is_alive())
+
+    def start_warmup(self) -> bool:
+        """Start a background model load; True when this call started one."""
+        if self._model is not None or self._load_attempted:
+            return False
+        with self._load_lock:
+            if self._model is not None or self._load_attempted:
+                return False
+            self._load_attempted = True
+            thread = threading.Thread(
+                target=self._load_model, name="kb-dense-warmup", daemon=True)
+            self._warmup_thread = thread
+            try:
+                thread.start()
+            except Exception as exc:
+                self._warmup_thread = None
+                self._load_attempted = False
+                self._load_error = "%s: %s" % (type(exc).__name__, exc)
+                _stderr("warn", "cannot start dense warmup: %s" % self._load_error)
+                return False
+        return True
+
     def ensure_loaded(self) -> bool:
         if self._model is not None:
             return True
-        if self._load_attempted:
-            return False
-        self._load_attempted = True
+        thread = self._warmup_thread
+        if thread is not None:
+            thread.join()
+            return self._model is not None
+        with self._load_lock:
+            if self._model is not None:
+                return True
+            if self._load_attempted:
+                return False
+            self._load_attempted = True
+        self._load_model()
+        return self._model is not None
+
+    def _load_model(self) -> None:
         if not self.capable:
             self._load_error = "numpy and sentence-transformers are required"
-            return False
+            return
         try:
             import numpy as np  # noqa: F401  (imported for its side effect)
             from sentence_transformers import SentenceTransformer  # type: ignore
         except Exception as exc:
             self._load_error = "%s: %s" % (type(exc).__name__, exc)
             _stderr("warn", "dense backend unavailable: %s" % self._load_error)
-            return False
+            return
         try:
             self._model = SentenceTransformer(self.model_name)
             self._numpy = np
-            return True
         except Exception as exc:
             self._load_error = "%s: %s" % (type(exc).__name__, exc)
             _stderr("warn", "cannot load embedding model %r: %s"
                     % (self.model_name, self._load_error))
-            return False
 
     def encode(self, texts: Sequence[str], is_query: bool = False) -> List[List[float]]:
         del is_query  # the caller applies the bge query prefix
@@ -1058,6 +1109,7 @@ class KBEngine:
                 raise KBError("bad_request", "request.params must be an object")
             handler = {
                 "ping": self.op_ping,
+                "warmup": self.op_warmup,
                 "stats": self.op_stats,
                 "ingest": self.op_ingest,
                 "search": self.op_search,
@@ -1174,6 +1226,47 @@ class KBEngine:
             payload += "\n"
         _atomic_write(path, payload.encode("utf-8"))
 
+    def _vector_meta(self, root: str) -> Dict[str, Any]:
+        path = _child(root, VECTORS_META)
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except (OSError, ValueError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    @staticmethod
+    def _vector_dim(vectors: Any) -> int:
+        try:
+            return len(vectors[0]) if len(vectors) else 0
+        except Exception:
+            return 0
+
+    def _valid_vectors(self, root: str, vectors: Any) -> Optional[Any]:
+        """Reject vectors built by another model or with a different width."""
+        if vectors is None:
+            return None
+        meta = self._vector_meta(root)
+        expected = getattr(self.dense, "model_name", None) if self.dense is not None else None
+        meta_model = meta.get("model")
+        if meta_model and expected and str(meta_model) != str(expected):
+            log_event(root, "warn",
+                      "vector model mismatch (index=%r current=%r); ignoring vectors"
+                      % (meta_model, expected))
+            return None
+        dim = self._vector_dim(vectors)
+        meta_dim = meta.get("dim")
+        if meta_dim is not None:
+            try:
+                if int(meta_dim) != dim:
+                    log_event(root, "warn",
+                              "vector dim mismatch (index=%r actual=%r); ignoring vectors"
+                              % (meta_dim, dim))
+                    return None
+            except (TypeError, ValueError):
+                pass
+        return vectors
+
     def _load_vectors(self, root: str) -> Optional[Any]:
         npy_path = _child(root, VECTORS_NPY)
         json_path = _child(root, VECTORS_JSON)
@@ -1182,7 +1275,7 @@ class KBEngine:
                 import numpy as np
                 array = np.load(npy_path, allow_pickle=False)
                 if getattr(array, "ndim", 0) == 2:
-                    return array.astype("float32")
+                    return self._valid_vectors(root, array.astype("float32"))
                 log_event(root, "warn", "vectors.npy has an unexpected shape")
                 return None
             except Exception as exc:
@@ -1196,9 +1289,23 @@ class KBEngine:
                 log_event(root, "warn", "cannot load vectors.json: %s" % exc)
                 return None
             if isinstance(data, list) and (not data or isinstance(data[0], list)):
-                return data
+                return self._valid_vectors(root, data)
             log_event(root, "warn", "vectors.json has an unexpected shape")
         return None
+
+    def _write_vector_meta(self, root: str, vectors: Sequence[Sequence[float]]) -> None:
+        model = getattr(self.dense, "model_name", None) if self.dense is not None else None
+        payload = {
+            "model": model,
+            "dim": self._vector_dim(vectors),
+            "count": len(vectors),
+            "built_at": _now_iso(),
+        }
+        try:
+            _atomic_write(_child(root, VECTORS_META),
+                          (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8"))
+        except Exception as exc:
+            log_event(root, "warn", "cannot write vector metadata: %s" % exc)
 
     def _write_vectors(self, root: str, vectors: Sequence[Sequence[float]]) -> None:
         npy_path = _child(root, VECTORS_NPY)
@@ -1225,6 +1332,7 @@ class KBEngine:
                     os.remove(json_path)
             except OSError:
                 pass
+            self._write_vector_meta(root, vectors)
             return
         tmp = "%s.tmp.%d" % (json_path, os.getpid())
         try:
@@ -1242,6 +1350,7 @@ class KBEngine:
                 os.remove(npy_path)
         except OSError:
             pass
+        self._write_vector_meta(root, vectors)
 
     @staticmethod
     def _vector_key(chunk: Dict[str, Any]) -> str:
@@ -1257,7 +1366,7 @@ class KBEngine:
         json_path = _child(root, VECTORS_JSON)
 
         def drop_vectors() -> None:
-            for path in (npy_path, json_path):
+            for path in (npy_path, json_path, _child(root, VECTORS_META)):
                 try:
                     if os.path.isfile(path):
                         os.remove(path)
@@ -1307,6 +1416,12 @@ class KBEngine:
         if missing or any(vector is None for vector in prepared):
             drop_vectors()
             return
+        widths = {len(vector) for vector in prepared if vector is not None}
+        if len(widths) > 1:
+            log_event(root, "warn",
+                      "mixed vector dimensions %r; dropping vectors" % sorted(widths))
+            drop_vectors()
+            return
         try:
             self._write_vectors(root, [vector for vector in prepared if vector is not None])
         except Exception as exc:
@@ -1321,7 +1436,47 @@ class KBEngine:
             "pong": True,
             "version": ENGINE_VERSION,
             "dense": dense,
+            "dense_loaded": bool(getattr(self.dense, "is_loaded", False)),
             "numpy": _module_present("numpy"),
+        }
+
+    def op_warmup(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Load the embedding model, optionally in the background."""
+        started = time.time()
+        backend = self.dense
+        capable = bool(backend is not None and getattr(backend, "capable", False))
+        if not capable:
+            return {
+                "ok": False,
+                "dense": False,
+                "loaded": False,
+                "loading": False,
+                "model": None,
+                "elapsed_ms": 0,
+                "reason": "dense backend unavailable",
+            }
+        wait = _get_bool(params, "wait", True)
+        if wait:
+            try:
+                loaded = bool(backend.ensure_loaded())
+            except Exception as exc:
+                log_event(_kb_root(params), "warn", "warmup failed: %s" % exc)
+                loaded = False
+        else:
+            starter = getattr(backend, "start_warmup", None)
+            if callable(starter):
+                try:
+                    starter()
+                except Exception as exc:
+                    log_event(_kb_root(params), "warn", "warmup failed: %s" % exc)
+            loaded = bool(getattr(backend, "is_loaded", False))
+        return {
+            "ok": True,
+            "dense": True,
+            "loaded": loaded,
+            "loading": bool(getattr(backend, "loading", False)),
+            "model": getattr(backend, "model_name", None),
+            "elapsed_ms": int((time.time() - started) * 1000),
         }
 
     def op_stats(self, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -1343,15 +1498,30 @@ class KBEngine:
             if isinstance(entry, dict) and entry.get("path")
         )
         backend, dense_model, capable = self._backend_report()
+        vector_meta = self._vector_meta(root)
+        has_vectors = (os.path.isfile(_child(root, VECTORS_NPY))
+                       or os.path.isfile(_child(root, VECTORS_JSON)))
+        vector_info = None
+        if has_vectors:
+            vector_info = {
+                "count": vector_meta.get("count") or len(chunks),
+                "dim": vector_meta.get("dim"),
+                "model": vector_meta.get("model"),
+                "built_at": vector_meta.get("built_at"),
+            }
         return {
             "docs": len(docs),
             "chunks": len(chunks),
             "dense": capable,
             "dense_model": dense_model,
+            "dense_loaded": bool(getattr(self.dense, "is_loaded", False)),
+            "dense_loading": bool(getattr(self.dense, "loading", False)),
+            "dense_lazy": bool(getattr(self.dense, "lazy", False)),
             "backend": backend,
             "kb_root": _display_path(root),
             "bytes": total_bytes,
             "updated_at": manifest.get("updated_at"),
+            "vectors": vector_info,
             "paths": paths[:50],
         }
 
@@ -1382,6 +1552,7 @@ class KBEngine:
                 raise KBError("bad_request", "params.paths must contain only strings")
         recursive = _get_bool(params, "recursive", True)
         force = _get_bool(params, "force", False)
+        prune = _get_bool(params, "prune", False)
         max_files = _clamp_int(params.get("max_files"), 50, 1, 100000)
         with_embeddings = params.get("with_embeddings", "auto")
 
@@ -1395,9 +1566,12 @@ class KBEngine:
         errors: List[Dict[str, Any]] = []
         candidates: List[str] = []
         seen = set()
+        scope_dirs: List[str] = []
+        scope_files: set = set()
         for raw in raw_paths:
             path = os.path.abspath(os.path.expanduser(raw))
             if os.path.isdir(path):
+                scope_dirs.append(os.path.normcase(os.path.abspath(path)))
                 for found in _walk_files(path, recursive):
                     key = os.path.normcase(os.path.abspath(found))
                     if key in seen:
@@ -1416,6 +1590,7 @@ class KBEngine:
                 if key in seen:
                     continue
                 seen.add(key)
+                scope_files.add(key)
                 candidates.append(path)
             else:
                 errors.append({
@@ -1501,6 +1676,36 @@ class KBEngine:
                 log_event(root, "warn", "ingest failed", path=display,
                           message=str(exc))
 
+        removed = 0
+        removed_paths: List[str] = []
+        if prune:
+            for doc_id in list(docs_meta.keys()):
+                entry = docs_meta.get(doc_id)
+                stored = entry.get("path") if isinstance(entry, dict) else None
+                if not isinstance(stored, str) or not stored:
+                    continue
+                if os.path.isfile(stored):
+                    continue  # still on disk (possibly pending this batch)
+                normalized = os.path.normcase(os.path.abspath(stored))
+                in_scope = normalized in scope_files or any(
+                    normalized == scope or normalized.startswith(scope + os.sep)
+                    for scope in scope_dirs
+                )
+                if not in_scope:
+                    continue
+                docs_meta.pop(doc_id, None)
+                by_doc.pop(doc_id, None)
+                removed += 1
+                removed_paths.append(_display_path(stored))
+                changed = True
+
+        if not changed and old_chunks and isinstance(with_embeddings, str) \
+                and with_embeddings.strip().lower() in ("on", "true", "1", "yes"):
+            # Backfill vectors on an unchanged BM25-only index (explicit "on").
+            vectors = self._load_vectors(root)
+            if vectors is None or len(vectors) != len(old_chunks):
+                self._sync_vectors(root, old_chunks, old_chunks, with_embeddings)
+
         if changed:
             ordered_ids = sorted(
                 by_doc.keys(),
@@ -1521,15 +1726,17 @@ class KBEngine:
 
         elapsed_ms = int((time.time() - started) * 1000)
         log_event(root, "info", "ingest finished", added=added, updated=updated,
-                  skipped=skipped, errors=len(errors), pending=pending,
-                  elapsed_ms=elapsed_ms)
+                  skipped=skipped, removed=removed, errors=len(errors),
+                  pending=pending, elapsed_ms=elapsed_ms)
         return {
             "added": added,
             "updated": updated,
             "skipped": skipped,
+            "removed": removed,
             "errors": errors,
             "pending": pending,
             "docs": docs_out,
+            "removed_paths": removed_paths[:50],
             "elapsed_ms": elapsed_ms,
         }
 
@@ -1554,11 +1761,24 @@ class KBEngine:
         dense_ready = False
         if mode in ("auto", "dense", "hybrid") and self.dense is not None \
                 and getattr(self.dense, "capable", False):
-            try:
-                dense_ready = bool(self.dense.ensure_loaded())
-            except Exception as exc:
-                log_event(root, "warn", "dense backend failed to load: %s" % exc)
-                dense_ready = False
+            lazy = bool(getattr(self.dense, "lazy", False))
+            if mode == "auto" and lazy \
+                    and not bool(getattr(self.dense, "is_loaded", False)):
+                # Never block the first query on a 14 s model load: answer with
+                # BM25 now and let the model warm up in the background.
+                starter = getattr(self.dense, "start_warmup", None)
+                if callable(starter):
+                    try:
+                        if starter():
+                            log_event(root, "info", "dense warmup started")
+                    except Exception as exc:
+                        log_event(root, "warn", "dense warmup failed: %s" % exc)
+            else:
+                try:
+                    dense_ready = bool(self.dense.ensure_loaded())
+                except Exception as exc:
+                    log_event(root, "warn", "dense backend failed to load: %s" % exc)
+                    dense_ready = False
 
         if mode == "auto":
             effective = "hybrid" if dense_ready else "bm25"
@@ -1846,7 +2066,8 @@ class KBEngine:
                           "clear requires params.confirm === true")
         manifest = self._load_manifest(root)
         removed_docs = len(manifest.get("docs") or {})
-        for name in (MANIFEST_NAME, CHUNKS_NAME, VECTORS_NPY, VECTORS_JSON):
+        for name in (MANIFEST_NAME, CHUNKS_NAME, VECTORS_NPY, VECTORS_JSON,
+                     VECTORS_META):
             path = _child(root, name)
             try:
                 if os.path.isfile(path):

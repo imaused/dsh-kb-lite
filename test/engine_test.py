@@ -307,6 +307,13 @@ class SearchTests(unittest.TestCase):
                            kb_root=str(self.kb_root), query="x", mode="magic")
         self.assertEqual(error["code"], "bad_request")
 
+    def test_warmup_reports_unavailable_backend(self):
+        result = call(self.engine, "warmup", kb_root=str(self.kb_root))
+        self.assertFalse(result["ok"])
+        self.assertFalse(result["dense"])
+        self.assertFalse(result["loaded"])
+        self.assertEqual(result["elapsed_ms"], 0)
+
 
 # --------------------------------------------------------------------------
 # ingest / stats / clear
@@ -367,6 +374,36 @@ class IngestTests(unittest.TestCase):
         self.assertEqual(forced["updated"], 3)
         self.assertEqual(forced["skipped"], 0)
 
+    def test_prune_removes_only_missing_files(self):
+        self._ingest()
+        victim = self.docs / "sub" / "nested.md"
+        victim.unlink()
+
+        # Without prune the vanished document stays searchable (old behaviour).
+        kept = self._ingest()
+        self.assertEqual(kept["removed"], 0)
+        self.assertEqual(call(self.engine, "stats",
+                              kb_root=str(self.kb_root))["docs"], 3)
+
+        pruned = self._ingest(prune=True)
+        self.assertEqual(pruned["removed"], 1)
+        self.assertEqual(pruned["updated"], 0)
+        self.assertEqual(pruned["skipped"], 2)
+        self.assertTrue(pruned["removed_paths"][0].endswith("nested.md"))
+        stats = call(self.engine, "stats", kb_root=str(self.kb_root))
+        self.assertEqual(stats["docs"], 2)
+        self.assertEqual(len(stats["paths"]), 2)
+
+        # Documents outside the scanned paths are never pruned.
+        outside = write_doc(self.tmp / "outside.md", "# 外部\n\n不应被删。\n")
+        call(self.engine, "ingest", kb_root=str(self.kb_root),
+             paths=[str(outside)])
+        outside.unlink()
+        scoped = self._ingest(prune=True)
+        self.assertEqual(scoped["removed"], 0)
+        self.assertEqual(call(self.engine, "stats",
+                              kb_root=str(self.kb_root))["docs"], 3)
+
     def test_max_files_and_pending(self):
         first = self._ingest(max_files=2)
         self.assertEqual(first["added"], 2)
@@ -423,6 +460,9 @@ class IngestTests(unittest.TestCase):
         self.assertFalse(stats["dense"])
         self.assertIsNone(stats["dense_model"])
         self.assertEqual(stats["backend"], "none")
+        self.assertFalse(stats["dense_loaded"])
+        self.assertFalse(stats["dense_loading"])
+        self.assertIsNone(stats["vectors"])
         self.assertEqual(Path(stats["kb_root"]).resolve(), self.kb_root.resolve())
 
         with open(self.kb_root / "chunks.jsonl", encoding="utf-8") as handle:
@@ -581,7 +621,7 @@ class ProtocolTests(unittest.TestCase):
         self.assertTrue(first_ping["ok"])
         self.assertTrue(first_ping["result"]["pong"])
         self.assertEqual(set(first_ping["result"]),
-                         {"pong", "version", "dense", "numpy"})
+                         {"pong", "version", "dense", "dense_loaded", "numpy"})
 
         malformed = parsed[2]
         self.assertIsNone(malformed["id"])
@@ -737,6 +777,58 @@ class FakeEmbedderTests(unittest.TestCase):
         stats = parsed[1]["result"]
         self.assertEqual(stats["dense_model"], "fake-hash-32")
         self.assertEqual(stats["backend"], "fake")
+
+    def test_auto_uses_hybrid_when_backend_is_eager(self):
+        engine = make_engine(KB.FakeHashBackend(8))
+        call(engine, "ingest", kb_root=str(self.kb_root), paths=[str(self.docs)],
+             with_embeddings="on")
+        result = call(engine, "search", kb_root=str(self.kb_root),
+                      query="BM25 排序", mode="auto")
+        self.assertEqual(result["mode_used"], "hybrid")
+
+    def test_lazy_auto_defers_dense_load(self):
+        class LazyFake(KB.FakeHashBackend):
+            lazy = True
+
+            def __init__(self):
+                super().__init__(8)
+                self.warm_started = False
+
+            @property
+            def is_loaded(self):
+                return False
+
+            def start_warmup(self):
+                self.warm_started = True
+                return True
+
+        engine = make_engine(LazyFake())
+        call(engine, "ingest", kb_root=str(self.kb_root), paths=[str(self.docs)],
+             with_embeddings="on")
+        result = call(engine, "search", kb_root=str(self.kb_root),
+                      query="BM25 排序", mode="auto")
+        self.assertEqual(result["mode_used"], "bm25")
+        self.assertTrue(engine.dense.warm_started)
+        forced = call(engine, "search", kb_root=str(self.kb_root),
+                      query="BM25 排序", mode="hybrid")
+        self.assertEqual(forced["mode_used"], "hybrid")
+
+    def test_vector_metadata_roundtrip_and_model_mismatch(self):
+        engine = make_engine(KB.FakeHashBackend(8))
+        call(engine, "ingest", kb_root=str(self.kb_root), paths=[str(self.docs)],
+             with_embeddings="on")
+        meta_path = self.kb_root / "vectors.meta.json"
+        self.assertTrue(meta_path.exists())
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        self.assertEqual(meta["dim"], 8)
+        self.assertEqual(meta["model"], "fake-hash-8")
+        stats = call(engine, "stats", kb_root=str(self.kb_root))
+        self.assertEqual(stats["vectors"]["dim"], 8)
+        self.assertEqual(stats["vectors"]["model"], "fake-hash-8")
+        self.assertIsNotNone(engine._load_vectors(str(self.kb_root)))
+        meta["model"] = "another-model"
+        meta_path.write_text(json.dumps(meta), encoding="utf-8")
+        self.assertIsNone(engine._load_vectors(str(self.kb_root)))
 
     def test_dense_disabled_env_forces_bm25(self):
         requests = [
