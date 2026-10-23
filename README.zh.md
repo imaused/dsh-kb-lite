@@ -202,7 +202,7 @@ kb_root/
 
 ## 状态
 
-版本 0.1.0。在 Windows 11、DSH 0.2.0-rc.2、Node 24、Python 3.14 上测过。Linux 与 macOS 未测试。
+版本 0.4.1。在 Windows 11、DSH 0.2.0-rc.2、Node 24、Python 3.14 上测过。Linux 与 macOS 未测试。
 
 这个插件怎么提交到插件列表，写在 [docs/submission.md](docs/submission.md) 里。
 

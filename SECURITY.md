@@ -1,6 +1,6 @@
 # Security model
 
-This describes version 0.1.0 of `dsh-kb-lite`: one host-only DSH plugin, five tools, one short-lived Python probe, one long-lived Python process. Every claim below is written so that you can check it against the files in this repository, and the commands to do that are at the end.
+This describes version 0.4.1 of `dsh-kb-lite`: one host-only DSH plugin, five tools, one short-lived Python probe, one long-lived Python process. Every claim below is written so that you can check it against the files in this repository, and the commands to do that are at the end.
 
 Nothing here is a request for trust. If a line in this document and a line in the code disagree, the code is what runs.
 
@@ -174,7 +174,7 @@ Every module named should be from the Python standard library, or one of the thr
 echo '{"id":"1","op":"ping","params":{}}' | python engine/kb_engine.py
 ```
 
-Expect a `ready` line, then `{"id":"1","ok":true,"result":{"pong":true,"version":"0.1.0",...}}`. No arguments, no configuration, no network.
+Expect a `ready` line, then `{"id":"1","ok":true,"result":{"pong":true,"version":"0.1.0",...}}` (that `version` is the engine version; the npm package version is 0.4.1). No arguments, no configuration, no network.
 
 **6. Confirm the write guard exists.**
 
