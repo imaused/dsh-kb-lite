@@ -4,7 +4,9 @@ Local knowledge base for DeepSeek Harness: ingest Markdown, text and PDF files, 
 
 English | [简体中文](README.zh.md)
 
-MIT. Host-only DSH plugin, five tools, no browser UI, and the engine opens no sockets. BM25 needs nothing beyond the Python standard library.
+> **0.4.4** — adds `kb_sync` and index-freshness reporting: `kb_stats`, `kb_search` and `kb_ask` now tell you when the index is behind the memory roots.
+
+MIT. Host-only DSH plugin, six tools, no browser UI, and the engine opens no sockets. BM25 needs nothing beyond the Python standard library.
 
 ## Why another one
 
@@ -12,11 +14,11 @@ MIT. Host-only DSH plugin, five tools, no browser UI, and the engine opens no so
 
 This plugin takes the other side of that trade: host-only, no client bundle, no client injection, and peer ranges written with an explicit prerelease branch so `0.2.0-rc.x` actually matches. Nothing is wrong with the idea of `dsh-kb-rag` — the blocker is the client dependency and the peer range, not the feature set. If a release appears that targets 0.2.x without injecting `dsh-client-runtime`, it will cover much of the same ground and there is no reason to prefer this one.
 
-The scope is deliberately smaller than a full RAG stack: five tools, one local index directory, and a BM25 path that works on a machine where you have never installed torch.
+The scope is deliberately smaller than a full RAG stack: six tools, one local index directory, and a BM25 path that works on a machine where you have never installed torch.
 
 ## Features
 
-- Five tools: `kb_ingest`, `kb_search`, `kb_ask`, `kb_stats`, `kb_clear`.
+- Six tools: `kb_ingest`, `kb_search`, `kb_ask`, `kb_stats`, `kb_sync`, `kb_clear`.
 - No browser UI and no client bundle. `package.json` deliberately has no `dsh.client` field: the plugin only adds host tools, so a DSH release that changes client APIs cannot break an installed copy. That matters because a broken client half takes the whole web UI down with it — DSH starts all-or-nothing.
 - Input: `.md`, `.markdown`, `.txt`, `.pdf`. PDF needs `pymupdf`; without it each PDF shows up as a per-file error and the rest of the batch still indexes. Other extensions are not read: a directory walk skips them, and a file you name explicitly is reported as `unsupported_extension`.
 - Recursive directory ingest — hidden directories and `.git`, `node_modules`, `.venv`, `__pycache__` and similar are skipped. Incremental by `sha256`: unchanged files are skipped, changed files are re-indexed, `force: true` re-parses regardless. `prune: true` drops documents whose files no longer exist under the paths you pass.
@@ -25,6 +27,7 @@ The scope is deliberately smaller than a full RAG stack: five tools, one local i
 - Optional dense retrieval through `sentence-transformers` and `BAAI/bge-small-zh-v1.5`, and `hybrid` mode that fuses both with reciprocal rank fusion (RRF).
 - Citations: `path`, `title`, `heading`, `start_line`/`end_line` for Markdown and text, `page` for PDF, plus `matched_by` showing which retriever found the chunk.
 - `kb_ask` returns verbatim source text inside a character budget — it does not paraphrase, summarise or rewrite.
+- `kb_sync` re-ingests only the files changed since the build (by mtime) and appends a line to `sync-log.jsonl`. `kb_stats` reports `indexed_at`, `index_age_ms` and `newer_count`; `kb_search` / `kb_ask` warn when the index is older than the memory roots.
 - One directory per knowledge base. No database server, no daemon, no port.
 
 ## Install
@@ -204,7 +207,7 @@ One caveat, because it is easy to get wrong: if you install the optional dense s
 
 ## Status
 
-Version 0.4.3. Tested on Windows 11 with DSH 0.2.0-rc.2, Node 24 and Python 3.14. Linux and macOS are untested.
+Version 0.4.5. Tested on Windows 11 with DSH 0.2.0-rc.2, Node 24 and Python 3.14. Linux and macOS are untested.
 
 How this plugin is submitted to the plugin list is written up in [docs/submission.md](docs/submission.md).
 

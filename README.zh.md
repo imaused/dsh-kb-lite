@@ -4,7 +4,9 @@ DeepSeek Harness 的本地知识库：把 Markdown、纯文本和 PDF 入库，�
 
 [English](README.md) | 简体中文
 
-MIT。宿主侧插件，五个工具，没有浏览器界面，引擎不打开任何 socket。BM25 只依赖 Python 标准库。
+> **0.4.4** — 新增 `kb_sync` 与索引新鲜度报告：`kb_stats`、`kb_search`、`kb_ask` 会告诉你索引是否落后于记忆根。
+
+MIT。宿主侧插件，六个工具，没有浏览器界面，引擎不打开任何 socket。BM25 只依赖 Python 标准库。
 
 ## 为什么还要另做一个
 
@@ -12,11 +14,11 @@ MIT。宿主侧插件，五个工具，没有浏览器界面，引擎不打开�
 
 本插件站在这条取舍的另一边：只有宿主侧，不带客户端包，不做客户端注入，peer 范围写成带显式预发布分支的形式，让 `0.2.0-rc.x` 真的能匹配上。`dsh-kb-rag` 的思路本身没有问题——卡住它的是客户端依赖和 peer 范围，不是功能。如果将来出现面向 0.2.x、且不再注入 `dsh-client-runtime` 的版本，它覆盖的范围和这个插件大部分重叠，没有理由优先选这个。
 
-范围是有意做小的：五个工具、一个本地索引目录、一条在从没装过 torch 的机器上也能跑的 BM25。
+范围是有意做小的：六个工具、一个本地索引目录、一条在从没装过 torch 的机器上也能跑的 BM25。
 
 ## 特性
 
-- 五个工具：`kb_ingest`、`kb_search`、`kb_ask`、`kb_stats`、`kb_clear`。
+- 六个工具：`kb_ingest`、`kb_search`、`kb_ask`、`kb_stats`、`kb_sync`、`kb_clear`。
 - 没有浏览器界面，也没有客户端包。`package.json` 里刻意不写 `dsh.client` 字段：插件只加宿主侧工具，所以 DSH 改客户端 API 时弄不坏已经装好的副本。这一点重要，因为客户端那一半一旦坏了会把整个 Web 界面一起带下去——DSH 的启动是全或无。
 - 输入：`.md`、`.markdown`、`.txt`、`.pdf`。PDF 需要 `pymupdf`；没有时每个 PDF 作为逐文件错误返回，批次其余文件照常入库。其它扩展名不读：目录遍历会跳过，显式点名的文件会以 `unsupported_extension` 报错。
 - 支持递归目录——隐藏目录以及 `.git`、`node_modules`、`.venv`、`__pycache__` 一类的目录会跳过。按 `sha256` 增量：未变化的文件跳过，内容变化的重新索引，`force: true` 无条件重解析。`prune: true` 会删除"文件已不存在、且位于本次路径范围内"的文档。
@@ -24,6 +26,7 @@ MIT。宿主侧插件，五个工具，没有浏览器界面，引擎不打开�
 - BM25 不依赖任何第三方库，含汉字二元组分词。
 - 可选的稠密检索走 `sentence-transformers` 和 `BAAI/bge-small-zh-v1.5`；`hybrid` 用倒数排名融合（RRF）合并两路结果。
 - 引用信息：`path`、`title`、`heading`，Markdown 与纯文本有 `start_line`/`end_line`，PDF 有 `page`，`matched_by` 说明这一块是哪一路检回的。
+- `kb_sync` 只重新入库自上次构建以来改过的文件（按 mtime），并往 `sync-log.jsonl` 追加一行。`kb_stats` 报告 `indexed_at`、`index_age_ms`、`newer_count`；`kb_search` / `kb_ask` 在索引落后于记忆根时告警。
 - `kb_ask` 在字符预算内返回原文，不改写、不摘要、不润色。
 - 一个知识库一个目录。没有数据库服务，没有守护进程，不占端口。
 
@@ -202,7 +205,7 @@ kb_root/
 
 ## 状态
 
-版本 0.4.2。在 Windows 11、DSH 0.2.0-rc.2、Node 24、Python 3.14 上测过。Linux 与 macOS 未测试。
+版本 0.4.5。在 Windows 11、DSH 0.2.0-rc.2、Node 24、Python 3.14 上测过。Linux 与 macOS 未测试。
 
 这个插件怎么提交到插件列表，写在 [docs/submission.md](docs/submission.md) 里。
 
