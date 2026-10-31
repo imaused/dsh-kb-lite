@@ -93,7 +93,7 @@ test('end-to-end: ingest -> search -> ask -> clear via the engine client', async
   }
 })
 
-test('end-to-end: the five registered tools work through the tool surface', async () => {
+test('end-to-end: the six registered tools work through the tool surface', async () => {
   const { base, docs } = makeCorpus()
   const kbRoot = join(base, '.kb-lite')
   const registered = []
@@ -108,7 +108,7 @@ test('end-to-end: the five registered tools work through the tool surface', asyn
   })
   try {
     assert.deepEqual(registered.map(d => d.name).sort(),
-      ['kb_ask', 'kb_clear', 'kb_ingest', 'kb_search', 'kb_stats'])
+      ['kb_ask', 'kb_clear', 'kb_ingest', 'kb_search', 'kb_stats', 'kb_sync'])
 
     const byName = Object.fromEntries(registered.map(d => [d.name, d]))
     const ing = await byName.kb_ingest.execute({ paths: [docs], kb_root: kbRoot })

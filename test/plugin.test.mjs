@@ -102,13 +102,13 @@ function autoRespond(transport, resultByOp = {}) {
   }
 }
 
-test('registers exactly the five kb tools with host-compatible definitions', () => {
+test('registers exactly the six kb tools with host-compatible definitions', () => {
   const transport = makeFakeTransport()
   const { ctx, dispose, byName } = installToolset(transport)
 
   try {
     const names = ctx.tools.registered.map((definition) => definition.name).sort()
-    assert.deepEqual(names, ['kb_ask', 'kb_clear', 'kb_ingest', 'kb_search', 'kb_stats'])
+    assert.deepEqual(names, ['kb_ask', 'kb_clear', 'kb_ingest', 'kb_search', 'kb_stats', 'kb_sync'])
 
     for (const definition of ctx.tools.registered) {
       assert.deepEqual(Object.keys(definition).sort(), [

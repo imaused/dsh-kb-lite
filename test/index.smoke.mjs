@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Smoke test for lib/index.js with a stubbed @deepseek-ai/dsh-tools package.
 // Copies lib/ into a temp directory, writes a stub host package, imports the
-// copied entry point and checks that apply(ctx, opts) registers all five tools.
+// copied entry point and checks that apply(ctx, opts) registers all six tools.
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -108,7 +108,7 @@ try {
   assert.equal(typeof dispose, 'function', 'apply(ctx, opts) must return a dispose function')
 
   const names = registered.map((definition) => definition.name).sort()
-  assert.deepEqual(names, ['kb_ask', 'kb_clear', 'kb_ingest', 'kb_search', 'kb_stats'])
+  assert.deepEqual(names, ['kb_ask', 'kb_clear', 'kb_ingest', 'kb_search', 'kb_stats', 'kb_sync'])
 
   for (const definition of registered) {
     assert.equal(typeof definition.output.render, 'function')
