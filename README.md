@@ -50,7 +50,7 @@ After it installs, restart DSH and open a **new** session. Tools are bound when 
 
 | Tool | What it does | Parameters |
 | --- | --- | --- |
-| `kb_ingest` | Index files or directories | `paths`, `recursive`, `force`, `prune`, `max_files`, `with_embeddings`, `kb_root` |
+| `kb_ingest` | Index files or directories | `paths`, `recursive`, `force`, `prune`, `max_files`, `with_embeddings`, `chunk_chars`, `chunk_overlap`, `kb_root` |
 | `kb_search` | Return scored chunks with snippets | `query`, `top_k`, `mode` (`auto`, `bm25`, `dense`, `hybrid`), `kb_root` |
 | `kb_ask` | Return verbatim passages for the model to cite, within a character budget | `query`, `top_k`, `max_chars`, `kb_root` |
 | `kb_stats` | Document and chunk counts, `kb_root`, size, `updated_at`, up to 50 indexed paths | `kb_root` |
@@ -59,6 +59,8 @@ After it installs, restart DSH and open a **new** session. Tools are bound when 
 `kb_root` is accepted by every tool and applies to that call only. Paths passed to `kb_ingest` must be absolute.
 
 Defaults: `recursive: true`, `force: false`, `prune: false`, `max_files: 50` (clamped to 1–500), `with_embeddings: "auto"`, `top_k: 8` for `kb_search` and `5` for `kb_ask` (both clamped to 1–50), `max_chars: 6000`. `with_embeddings` accepts `"auto"` (embed when the dense stack is available), `"on"` and `"off"`; `"off"` skips vector work for that ingest when you only want BM25.
+
+`chunk_chars` (default 1200, clamped to 200–8000) and `chunk_overlap` (default 120, clamped to 0–`chunk_chars`/2) are per ingest call. The setting is stored in the manifest: changing it re-chunks every already-indexed document on the next ingest, so you do not need `force: true` for that.
 
 ## Quick start
 
@@ -189,7 +191,7 @@ These are known and not hidden behind configuration:
 - **No OCR.** A scanned PDF has no text layer, so it yields nothing. Run OCR yourself first and ingest the text.
 - **No incremental vector-store update.** Every ingest rewrites the whole vector file to match the new chunk list; unchanged chunks reuse their cached embeddings, but there is no append and no background compaction.
 - **The BM25 index is rebuilt per query, not cached.** That is fine for the intended size (hundreds of files, thousands of chunks) and it keeps the on-disk format trivial; it is not the design to pick for a hundred-thousand-chunk corpus. Measured on this machine: 25 chunks answer a query in milliseconds; the cost grows with the corpus, not with the query.
-- **Chunk size is fixed.** 1200 characters with 120 of overlap. There is no per-call or per-file override.
+- **Chunk size is fixed per ingest batch.** `chunk_chars` and `chunk_overlap` are per-call; there is no per-file override, and the whole corpus shares one setting.
 - **Four extensions only.** `.md`, `.markdown`, `.txt`, `.pdf`. DOCX, HTML and EPUB are not read.
 - **The engine is a per-plugin-instance process, not a shared daemon.** Each DSH instance that loads the plugin starts its own `python engine/kb_engine.py`. Two profiles mean two processes, each loading its own copy of the embedding model if dense retrieval is on — not one shared service.
 
@@ -207,7 +209,7 @@ One caveat, because it is easy to get wrong: if you install the optional dense s
 
 ## Status
 
-Version 0.4.5. Tested on Windows 11 with DSH 0.2.0-rc.2, Node 24 and Python 3.14. Linux and macOS are untested.
+Version 0.4.6. Tested on Windows 11 with DSH 0.2.0-rc.2, Node 24 and Python 3.14. Linux and macOS are untested.
 
 How this plugin is submitted to the plugin list is written up in [docs/submission.md](docs/submission.md).
 

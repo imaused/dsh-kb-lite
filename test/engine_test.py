@@ -141,6 +141,14 @@ def build_search_corpus(test_case):
 # chunking
 # --------------------------------------------------------------------------
 class ChunkerTests(unittest.TestCase):
+    def test_chunk_size_override_changes_spans(self):
+        text = "# T\n" + ("word " * 400)
+        _, small = KB.chunk_markdown(text, "t", 200, 20)
+        _, big = KB.chunk_markdown(text, "t", 1200, 120)
+        self.assertGreater(len(small), len(big))
+        for chunk in small:
+            self.assertLessEqual(len(chunk["text"]), 200)
+
     def test_markdown_heading_split_and_line_ranges(self):
         text = (FIXTURES / "sample.md").read_text(encoding="utf-8")
         source_lines = text.split("\n")
@@ -335,6 +343,18 @@ class IngestTests(unittest.TestCase):
         params = {"kb_root": str(self.kb_root), "paths": [str(self.docs)]}
         params.update(overrides)
         return call(self.engine, "ingest", **params)
+
+    def test_chunk_size_change_rechunks_without_force(self):
+        long_doc = self.tmp / "long.md"
+        write_doc(long_doc, "# L\n" + ("word " * 600))
+        self._ingest(paths=[str(long_doc)], chunk_chars=300, chunk_overlap=30)
+        small = len(self.engine._load_chunks(str(self.kb_root)))
+        again = self._ingest(paths=[str(long_doc)])
+        big = len(self.engine._load_chunks(str(self.kb_root)))
+        self.assertGreater(small, big)
+        self.assertEqual(again["skipped"], 0)
+        self.assertEqual(again["updated"], 1)
+
 
     def test_incremental_add_skip_update(self):
         first = self._ingest()

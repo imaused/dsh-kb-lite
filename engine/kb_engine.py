@@ -41,6 +41,8 @@ MANIFEST_VERSION = 1
 MAX_FILE_BYTES = 20 * 1024 * 1024          # skip files above 20 MB
 MAX_CHUNK_CHARS = 1200                     # hard upper bound for a chunk
 CHUNK_OVERLAP = 120                        # characters shared by neighbours
+CHUNK_CHARS_MIN = 200                      # per-ingest override floor
+CHUNK_CHARS_MAX = 8000                     # per-ingest override ceiling
 SNIPPET_CHARS = 300                        # search snippet budget
 TOP_K_MAX = 50                             # top_k clamp: 1..50
 TOP_K_DEFAULT = 8
@@ -276,6 +278,22 @@ def _clamp_int(value: Any, default: int, low: int, high: int) -> int:
     else:
         raise KBError("bad_request", "expected an integer, got %r" % (value,))
     return max(low, min(high, number))
+
+
+def _chunk_cfg(params: Dict[str, Any]) -> Dict[str, int]:
+    """Resolve the per-ingest chunk settings (chars, overlap).
+
+    Defaults are the module constants; `chunk_chars` is clamped to
+    [CHUNK_CHARS_MIN, CHUNK_CHARS_MAX] and the overlap can never exceed half of
+    a chunk, so a neighbouring chunk always advances.
+    """
+    chars = _clamp_int(params.get("chunk_chars"), MAX_CHUNK_CHARS,
+                       CHUNK_CHARS_MIN, CHUNK_CHARS_MAX)
+    max_overlap = max(0, chars // 2)
+    raw_overlap = params.get("chunk_overlap")
+    overlap = CHUNK_OVERLAP if raw_overlap is None else _clamp_int(
+        raw_overlap, CHUNK_OVERLAP, 0, max_overlap)
+    return {"chars": chars, "overlap": min(overlap, max_overlap)}
 
 
 def _require_query(params: Dict[str, Any]) -> str:
@@ -610,8 +628,10 @@ def _heading_text(heading: Optional[str]) -> str:
 
 
 def chunk_markdown(text: str,
-                   fallback_title: Optional[str] = None) -> Tuple[str, List[Dict[str, Any]]]:
-    """Chunk Markdown by ATX heading, splitting oversized sections at 1200 chars."""
+                   fallback_title: Optional[str] = None,
+                   max_chars: int = MAX_CHUNK_CHARS,
+                   overlap: int = CHUNK_OVERLAP) -> Tuple[str, List[Dict[str, Any]]]:
+    """Chunk Markdown by ATX heading, splitting oversized sections."""
     sections = _markdown_sections(text or "")
     title = None
     for section in sections:
@@ -633,7 +653,7 @@ def chunk_markdown(text: str,
             continue
         heading = section["heading"] or title
         newlines = _line_numbers(body)
-        for start, end in split_offsets(body):
+        for start, end in split_offsets(body, max_chars, overlap):
             piece = _span_chunk(body, newlines, section["start"], start, end)
             if piece is None:
                 continue
@@ -649,8 +669,10 @@ def chunk_markdown(text: str,
 
 
 def chunk_text_plain(text: str,
-                     fallback_title: Optional[str] = None) -> Tuple[str, List[Dict[str, Any]]]:
-    """Chunk plain text: paragraphs merged greedily to <=1200 chars, 120 overlap."""
+                     fallback_title: Optional[str] = None,
+                     max_chars: int = MAX_CHUNK_CHARS,
+                     overlap: int = CHUNK_OVERLAP) -> Tuple[str, List[Dict[str, Any]]]:
+    """Chunk plain text: paragraphs merged greedily up to max_chars, with overlap."""
     body = text or ""
     title = None
     for line in body.split("\n"):
@@ -663,7 +685,7 @@ def chunk_text_plain(text: str,
     chunks: List[Dict[str, Any]] = []
     if body.strip():
         newlines = _line_numbers(body)
-        for start, end in split_offsets(body):
+        for start, end in split_offsets(body, max_chars, overlap):
             piece = _span_chunk(body, newlines, 1, start, end)
             if piece is None:
                 continue
@@ -678,7 +700,9 @@ def chunk_text_plain(text: str,
     return title, chunks
 
 
-def chunk_pdf(path: str) -> Tuple[str, Optional[int], List[Dict[str, Any]]]:
+def chunk_pdf(path: str,
+              max_chars: int = MAX_CHUNK_CHARS,
+              overlap: int = CHUNK_OVERLAP) -> Tuple[str, Optional[int], List[Dict[str, Any]]]:
     """Chunk a PDF page by page; 1-based ``page`` numbers."""
     try:
         import fitz  # type: ignore  # PyMuPDF
@@ -712,7 +736,7 @@ def chunk_pdf(path: str) -> Tuple[str, Optional[int], List[Dict[str, Any]]]:
             if not page_text.strip():
                 continue
             newlines = _line_numbers(page_text)
-            for start, end in split_offsets(page_text):
+            for start, end in split_offsets(page_text, max_chars, overlap):
                 piece = _span_chunk(page_text, newlines, 1, start, end)
                 if piece is None:
                     continue
@@ -1152,9 +1176,11 @@ class KBEngine:
         for doc_id, entry in docs.items():
             if isinstance(doc_id, str) and isinstance(entry, dict):
                 clean[doc_id] = entry
+        chunk_cfg = data.get("chunk")
         return {
             "version": MANIFEST_VERSION,
             "docs": clean,
+            "chunk": chunk_cfg if isinstance(chunk_cfg, dict) else {},
             "updated_at": data.get("updated_at"),
         }
 
@@ -1526,14 +1552,21 @@ class KBEngine:
         }
 
     # -- ingest ------------------------------------------------------------
-    def _parse_file(self, path: str, kind: str) -> Dict[str, Any]:
+    def _parse_file(self, path: str, kind: str,
+                    chunk_cfg: Optional[Dict[str, int]] = None) -> Dict[str, Any]:
+        cfg = chunk_cfg or {"chars": MAX_CHUNK_CHARS, "overlap": CHUNK_OVERLAP}
+        max_chars = int(cfg.get("chars") or MAX_CHUNK_CHARS)
+        raw_overlap = cfg.get("overlap")
+        overlap = CHUNK_OVERLAP if raw_overlap is None else int(raw_overlap)
         if kind == "pdf":
-            title, pages, chunks = chunk_pdf(path)
+            title, pages, chunks = chunk_pdf(path, max_chars, overlap)
         elif kind in ("md", "markdown"):
-            title, chunks = chunk_markdown(_read_text_file(path), _stem(path))
+            title, chunks = chunk_markdown(_read_text_file(path), _stem(path),
+                                           max_chars, overlap)
             pages = None
         elif kind == "txt":
-            title, chunks = chunk_text_plain(_read_text_file(path), _stem(path))
+            title, chunks = chunk_text_plain(_read_text_file(path), _stem(path),
+                                             max_chars, overlap)
             pages = None
         else:
             raise KBError("unsupported_extension",
@@ -1555,9 +1588,17 @@ class KBEngine:
         prune = _get_bool(params, "prune", False)
         max_files = _clamp_int(params.get("max_files"), 50, 1, 100000)
         with_embeddings = params.get("with_embeddings", "auto")
+        chunk_cfg = _chunk_cfg(params)
 
         manifest = self._load_manifest(root)
         docs_meta: Dict[str, Any] = manifest["docs"]
+        # A legacy index has no "chunk" block: treat it as the defaults, so an
+        # upgrade alone re-chunks nothing, while an explicit different setting does.
+        previous_cfg = manifest.get("chunk") if isinstance(manifest.get("chunk"), dict) else {}
+        previous_chars = int(previous_cfg.get("chars", MAX_CHUNK_CHARS))
+        previous_overlap = int(previous_cfg.get("overlap", CHUNK_OVERLAP))
+        rechunk = (previous_chars != chunk_cfg["chars"]
+                   or previous_overlap != chunk_cfg["overlap"])
         old_chunks = self._load_chunks(root)
         by_doc: Dict[str, List[Dict[str, Any]]] = {}
         for chunk in old_chunks:
@@ -1625,14 +1666,14 @@ class KBEngine:
                 doc_id = _doc_id_for(path)
                 previous = docs_meta.get(doc_id)
                 mtime = float(stat.st_mtime)
-                if (previous is not None and not force
+                if (previous is not None and not force and not rechunk
                         and previous.get("sha256") == digest
                         and int(previous.get("size") or -1) == int(stat.st_size)
                         and _mtime_same(previous.get("mtime"), mtime)):
                     skipped += 1
                     continue
 
-                parsed = self._parse_file(path, kind)
+                parsed = self._parse_file(path, kind, chunk_cfg)
                 doc_chunks: List[Dict[str, Any]] = []
                 for ordinal, chunk in enumerate(parsed["chunks"]):
                     doc_chunks.append({
@@ -1721,6 +1762,7 @@ class KBEngine:
             self._save_manifest(root, {
                 "version": MANIFEST_VERSION,
                 "docs": docs_meta,
+                "chunk": chunk_cfg,
                 "updated_at": _now_iso(),
             })
 
