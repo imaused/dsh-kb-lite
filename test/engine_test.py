@@ -509,9 +509,13 @@ class IngestTests(unittest.TestCase):
         self.assertIn("ingest finished", log_path.read_text(encoding="utf-8"))
 
     def test_storage_writes_are_confined_to_kb_root(self):
-        for name in ("../escaped.json", "..\\escaped.json"):
+        with self.assertRaises(KB.KBError):
+            KB._child(str(self.kb_root), "../escaped.json")
+        if os.name == "nt":
+            # Backslash is a path separator only on Windows; on POSIX it is a
+            # legal file-name character, so the rejection does not apply there.
             with self.assertRaises(KB.KBError):
-                KB._child(str(self.kb_root), name)
+                KB._child(str(self.kb_root), "..\\escaped.json")
 
     def test_paths_capped_at_fifty(self):
         many = self.tmp / "many"
