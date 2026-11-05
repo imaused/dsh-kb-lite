@@ -424,6 +424,33 @@ class IngestTests(unittest.TestCase):
         self.assertEqual(call(self.engine, "stats",
                               kb_root=str(self.kb_root))["docs"], 3)
 
+    def test_stats_reports_superseded_and_orphaned(self):
+        self._ingest()
+        stats = call(self.engine, "stats", kb_root=str(self.kb_root))
+        self.assertEqual(stats["superseded"], 0)
+        self.assertEqual(stats["orphaned"], 0)
+
+        # Mark one indexed Markdown file as superseded and re-ingest it.
+        target = self.docs / "sample.md"
+        original = target.read_text(encoding="utf-8")
+        target.write_text(
+            "---\nstatus: superseded\nsuperseded_by: next.md\n---\n\n"
+            + original,
+            encoding="utf-8",
+        )
+        os.utime(target, (time.time() + 10, time.time() + 10))
+        self._ingest()
+        stats = call(self.engine, "stats", kb_root=str(self.kb_root))
+        self.assertEqual(stats["superseded"], 1)
+        self.assertTrue(stats["superseded_paths"][0].endswith("sample.md"))
+
+        # A vanished source file stays indexed but is reported as orphaned.
+        (self.docs / "sub" / "nested.md").unlink()
+        stats = call(self.engine, "stats", kb_root=str(self.kb_root))
+        self.assertEqual(stats["docs"], 3)
+        self.assertEqual(stats["orphaned"], 1)
+        self.assertTrue(stats["orphaned_paths"][0].endswith("nested.md"))
+
     def test_max_files_and_pending(self):
         first = self._ingest(max_files=2)
         self.assertEqual(first["added"], 2)

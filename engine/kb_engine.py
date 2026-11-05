@@ -241,6 +241,28 @@ def _read_text_file(path: str) -> str:
     return text
 
 
+def _front_matter_status(path: str) -> str:
+    """Read the first 2 KiB and return `status:` from the YAML front matter.
+
+    Returns an empty string when there is no front matter or no status key.
+    Only `.md`/`.markdown` files are worth calling this on; the caller checks
+    the extension so PDFs and plain text are never opened here.
+    """
+    try:
+        with open(path, "r", encoding="utf-8-sig", errors="replace") as handle:
+            head = handle.read(2048)
+    except (OSError, ValueError):
+        return ""
+    if not head.startswith("---"):
+        return ""
+    for line in head.splitlines()[1:]:
+        if line.strip() == "---":
+            break
+        if line.strip().lower().startswith("status:"):
+            return line.split(":", 1)[1].strip().strip("'\"").lower()
+    return ""
+
+
 def _mtime_same(stored: Any, current: float) -> bool:
     try:
         return abs(float(stored) - float(current)) <= 1e-5
@@ -1523,6 +1545,20 @@ class KBEngine:
             entry.get("path") for entry in docs.values()
             if isinstance(entry, dict) and entry.get("path")
         )
+        missing: List[str] = []
+        superseded: List[str] = []
+        for entry in docs.values():
+            if not isinstance(entry, dict):
+                continue
+            doc_path = entry.get("path")
+            if not doc_path:
+                continue
+            if not os.path.isfile(doc_path):
+                missing.append(doc_path)
+                continue
+            if (doc_path.lower().endswith((".md", ".markdown"))
+                    and _front_matter_status(doc_path) == "superseded"):
+                superseded.append(doc_path)
         backend, dense_model, capable = self._backend_report()
         vector_meta = self._vector_meta(root)
         has_vectors = (os.path.isfile(_child(root, VECTORS_NPY))
@@ -1549,6 +1585,10 @@ class KBEngine:
             "updated_at": manifest.get("updated_at"),
             "vectors": vector_info,
             "paths": paths[:50],
+            "orphaned": len(missing),
+            "orphaned_paths": missing[:20],
+            "superseded": len(superseded),
+            "superseded_paths": superseded[:20],
         }
 
     # -- ingest ------------------------------------------------------------

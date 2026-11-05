@@ -59,9 +59,13 @@ result:
  "dense_loaded":false,"dense_loading":false,"dense_lazy":false,
  "kb_root":"...","bytes":0,"updated_at":null,
  "vectors":{"count":0,"dim":512,"model":"...","built_at":"..."},
- "paths":[]}
+ "paths":[],
+ "orphaned":0,"orphaned_paths":[],
+ "superseded":0,"superseded_paths":[]}
 ```
 `vectors` 是 `vectors.meta.json` 的摘要，没有向量时为 `null`；`paths` 最多列 50 条文档路径（给 agent 看库里有啥）。
+`orphaned` 是"已索引但源文件不存在"的文档数，`superseded` 是 front-matter 里 `status: superseded` 的 Markdown 文档数；
+两者各附最多 20 条路径。它们只做报告，不删除任何索引条目——清理仍走 `prune`。
 
 ### `ingest`
 params:

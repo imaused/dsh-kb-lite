@@ -4,7 +4,7 @@ DeepSeek Harness 的本地知识库：把 Markdown、纯文本和 PDF 入库，�
 
 [English](README.md) | 简体中文
 
-> **0.4.4** — 新增 `kb_sync` 与索引新鲜度报告：`kb_stats`、`kb_search`、`kb_ask` 会告诉你索引是否落后于记忆根。
+> **0.4.10** — `kb_stats` 增加 `orphaned`（已索引但源文件不存在）与 `superseded`（front-matter 里 `status: superseded`）计数，各附最多 20 条路径。0.4.4 曾加入 `kb_sync` 与索引新鲜度报告。
 
 MIT。宿主侧插件，六个工具，没有浏览器界面，引擎不打开任何 socket。BM25 只依赖 Python 标准库。
 
@@ -26,7 +26,7 @@ MIT。宿主侧插件，六个工具，没有浏览器界面，引擎不打开�
 - BM25 不依赖任何第三方库，含汉字二元组分词。
 - 可选的稠密检索走 `sentence-transformers` 和 `BAAI/bge-small-zh-v1.5`；`hybrid` 用倒数排名融合（RRF）合并两路结果。
 - 引用信息：`path`、`title`、`heading`，Markdown 与纯文本有 `start_line`/`end_line`，PDF 有 `page`，`matched_by` 说明这一块是哪一路检回的。
-- `kb_sync` 只重新入库自上次构建以来改过的文件（按 mtime），并往 `sync-log.jsonl` 追加一行。`kb_stats` 报告 `indexed_at`、`index_age_ms`、`newer_count`；`kb_search` / `kb_ask` 在索引落后于记忆根时告警。
+- `kb_sync` 只重新入库自上次构建以来改过的文件（按 mtime），并往 `sync-log.jsonl` 追加一行。`kb_stats` 报告 `indexed_at`、`index_age_ms`、`newer_count`；`kb_search` / `kb_ask` 在索引落后于记忆根时告警。它还报告 `orphaned`（已索引、源文件已不存在）与 `superseded`（front-matter 里 `status: superseded`）计数，各附最多 20 条路径。
 - `kb_ask` 在字符预算内返回原文，不改写、不摘要、不润色。
 - 一个知识库一个目录。没有数据库服务，没有守护进程，不占端口。
 
@@ -53,7 +53,7 @@ dsh plugin --profile web add github:imaused/dsh-kb-lite
 | `kb_ingest` | 索引文件或目录 | `paths`、`recursive`、`force`、`prune`、`max_files`、`with_embeddings`、`kb_root` |
 | `kb_search` | 返回带片段的打分结果 | `query`、`top_k`、`mode`（`auto`、`bm25`、`dense`、`hybrid`）、`kb_root` |
 | `kb_ask` | 在字符预算内返回可供模型引用的原文段落 | `query`、`top_k`、`max_chars`、`kb_root` |
-| `kb_stats` | 文档数、块数、`kb_root`、占用大小、`updated_at`，最多 50 条已索引路径 | `kb_root` |
+| `kb_stats` | 文档数、块数、`kb_root`、占用大小、`updated_at`，最多 50 条已索引路径，`orphaned` / `superseded` 计数 | `kb_root` |
 | `kb_clear` | 删除索引 | `confirm: true`、`kb_root` |
 
 每个工具都接受可选的 `kb_root`，只对本次调用生效。传给 `kb_ingest` 的路径必须是绝对路径。
