@@ -51,6 +51,7 @@ MAX_CHARS_MIN = 500                        # ask budget clamp: 500..30000
 MAX_CHARS_MAX = 30000
 MAX_CHARS_DEFAULT = 6000
 RRF_K = 60                                 # reciprocal rank fusion constant
+SUPERSEDED_WEIGHT = 0.3                    # score multiplier for status: superseded docs
 
 # --- retrieval constants --------------------------------------------------
 BM25_K1 = 1.2
@@ -1713,6 +1714,9 @@ class KBEngine:
                     skipped += 1
                     continue
 
+                status = ""
+                if kind in ("md", "markdown"):
+                    status = _front_matter_status(path)
                 parsed = self._parse_file(path, kind, chunk_cfg)
                 doc_chunks: List[Dict[str, Any]] = []
                 for ordinal, chunk in enumerate(parsed["chunks"]):
@@ -1734,6 +1738,7 @@ class KBEngine:
                     "size": int(stat.st_size),
                     "title": parsed["title"],
                     "kind": kind,
+                    "status": status or None,
                     "pages": parsed["pages"],
                     "chunks": len(doc_chunks),
                 }
@@ -2038,7 +2043,8 @@ class KBEngine:
     @staticmethod
     def _detail(comp: Dict[str, Any], boost: float, rule: Optional[str],
                 final: float, recency: float = 1.0,
-                age_days: Optional[float] = None) -> Dict[str, Any]:
+                age_days: Optional[float] = None,
+                superseded: bool = False) -> Dict[str, Any]:
         detail = {
             "bm25": _round_optional(comp.get("bm25")),
             "dense": _round_optional(comp.get("dense")),
@@ -2047,6 +2053,7 @@ class KBEngine:
             "boost_rule": rule,
             "recency": round(float(recency), 4),
             "age_days": age_days,
+            "superseded": bool(superseded),
             "final": round(float(final), 6),
         }
         if comp.get("rerank") is not None:
@@ -2070,7 +2077,8 @@ class KBEngine:
             return {"mode_used": "bm25", "hits": []}
         ranked, mode_used = self._retrieve(root, chunks, manifest, query, top_k,
                                            mode, weights)
-        hits = []
+        include_superseded = _get_bool(params, "include_superseded", False)
+        rows = []
         for index, score, sources, comp in ranked:
             chunk = chunks[index]
             path, _title = self._doc_info(manifest, chunk.get("doc_id") or "")
@@ -2078,9 +2086,16 @@ class KBEngine:
             mult, rule = _boost_for(path, weights["boost"])
             rec, age_days = _recency_mult(meta.get("mtime"), weights["recency"])
             final = float(score) * mult * rec
+            superseded = meta.get("status") == "superseded"
+            if superseded and not include_superseded:
+                final *= SUPERSEDED_WEIGHT
+            rows.append((final, index, sources, comp, mult, rule, rec, age_days, superseded))
+        rows.sort(key=lambda row: -row[0])
+        hits = []
+        for final, index, sources, comp, mult, rule, rec, age_days, superseded in rows:
+            chunk = chunks[index]
             hits.append(self._hit(chunk, manifest, final, sources,
-                                  self._detail(comp, mult, rule, final, rec, age_days)))
-        hits.sort(key=lambda item: -item["score"])
+                                  self._detail(comp, mult, rule, final, rec, age_days, superseded)))
         log_event(root, "info", "search", query=query[:80], mode=mode_used,
                   hits=len(hits), top_k=top_k,
                   w_bm25=weights["bm25"], w_dense=weights["dense"],
@@ -2106,9 +2121,23 @@ class KBEngine:
             return {"evidence": [], "total_chars": 0, "mode_used": "bm25"}
         ranked, mode_used = self._retrieve(root, chunks, manifest, query, top_k,
                                            mode, weights)
+        include_superseded = _get_bool(params, "include_superseded", False)
+        rows = []
+        for index, score, _sources, comp in ranked:
+            chunk = chunks[index]
+            path, _title = self._doc_info(manifest, chunk.get("doc_id") or "")
+            meta = self._doc_meta(manifest, chunk.get("doc_id") or "")
+            mult, rule = _boost_for(path, weights["boost"])
+            rec, age_days = _recency_mult(meta.get("mtime"), weights["recency"])
+            final = float(score) * mult * rec
+            superseded = meta.get("status") == "superseded"
+            if superseded and not include_superseded:
+                final *= SUPERSEDED_WEIGHT
+            rows.append((final, index, comp, mult, rule, rec, age_days, superseded))
+        rows.sort(key=lambda row: -row[0])
         evidence: List[Dict[str, Any]] = []
         used = 0
-        for index, score, _sources, comp in ranked:
+        for final, index, comp, mult, rule, rec, age_days, superseded in rows:
             remaining = budget - used
             if remaining <= 0:
                 break
@@ -2121,10 +2150,6 @@ class KBEngine:
                 if not text.strip():
                     continue
             path, title = self._doc_info(manifest, chunk.get("doc_id") or "")
-            meta = self._doc_meta(manifest, chunk.get("doc_id") or "")
-            mult, rule = _boost_for(path, weights["boost"])
-            rec, age_days = _recency_mult(meta.get("mtime"), weights["recency"])
-            final = float(score) * mult * rec
             evidence.append({
                 "path": path,
                 "title": title,
@@ -2133,7 +2158,7 @@ class KBEngine:
                 "end_line": chunk.get("end_line"),
                 "page": chunk.get("page"),
                 "score": round(final, 6),
-                "score_detail": self._detail(comp, mult, rule, final, rec, age_days),
+                "score_detail": self._detail(comp, mult, rule, final, rec, age_days, superseded),
                 "text": text,
             })
             used += len(text)

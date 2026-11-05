@@ -965,6 +965,52 @@ class EncodingTests(unittest.TestCase):
         self.assertIn("网络共享.md", ask["evidence"][0]["path"])
 
 
+class SupersededSearchTests(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.tmp = Path(directory.name)
+        self.docs = self.tmp / "docs"
+        self.docs.mkdir()
+        self.kb_root = self.tmp / ".kb-lite"
+        self.engine = make_engine()
+
+    def _ingest(self):
+        return call(self.engine, "ingest", kb_root=str(self.kb_root),
+                    paths=[str(self.docs)])
+
+    def test_superseded_hits_are_downweighted_by_default(self):
+        write_doc(self.docs / "old.md",
+                  "---\nstatus: superseded\n---\n\n网络 共享 旧结论\n")
+        write_doc(self.docs / "new.md", "# 网络 共享 新结论\n")
+        self._ingest()
+        normal = call(self.engine, "search", kb_root=str(self.kb_root),
+                      query="网络 共享", top_k=10)
+        old = next(h for h in normal["hits"] if h["path"].endswith("old.md"))
+        self.assertTrue(old["score_detail"]["superseded"])
+
+        included = call(self.engine, "search", kb_root=str(self.kb_root),
+                        query="网络 共享", top_k=10, include_superseded=True)
+        old_full = next(h for h in included["hits"] if h["path"].endswith("old.md"))
+        self.assertAlmostEqual(old["score"] / old_full["score"],
+                               KB.SUPERSEDED_WEIGHT, places=3)
+
+    def test_ask_also_downweights_superseded(self):
+        write_doc(self.docs / "old.md",
+                  "---\nstatus: superseded\n---\n\n网络 共享 旧结论\n")
+        write_doc(self.docs / "new.md", "# 网络 共享 新结论\n")
+        self._ingest()
+        normal = call(self.engine, "ask", kb_root=str(self.kb_root),
+                      query="网络 共享", max_chars=6000)
+        old = next(e for e in normal["evidence"] if e["path"].endswith("old.md"))
+        self.assertTrue(old["score_detail"]["superseded"])
+        included = call(self.engine, "ask", kb_root=str(self.kb_root),
+                        query="网络 共享", max_chars=6000, include_superseded=True)
+        old_full = next(e for e in included["evidence"] if e["path"].endswith("old.md"))
+        self.assertAlmostEqual(old["score"] / old_full["score"],
+                               KB.SUPERSEDED_WEIGHT, places=3)
+
+
 if __name__ == "__main__":
     # Keep the harness readable on a cp936 console when output is captured
     # (the engine itself independently forces UTF-8 in serve()).

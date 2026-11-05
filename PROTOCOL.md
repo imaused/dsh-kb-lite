@@ -91,9 +91,10 @@ result:
 ### `search`
 params:
 ```json
-{"kb_root":str,"query":str,"top_k":8,"mode":"auto"}
+{"kb_root":str,"query":str,"top_k":8,"mode":"auto","include_superseded":false}
 ```
 `mode`: `auto`（有 dense 就 hybrid，否则 bm25；`KB_LITE_LAZY_DENSE=1` 且模型尚未加载时先返回 bm25 并后台预热）| `bm25` | `dense` | `hybrid`。
+`include_superseded`（默认 `false`）：为 `false` 时，front-matter 里 `status: superseded` 的文档得分乘 `SUPERSEDED_WEIGHT`（0.3）；为 `true` 时按原分参与排序。命中仍会带上该文档（可发现），只是不再压过有效结论。
 可选 `weights`（全部缺省即旧行为）：
 
 ```json
@@ -118,7 +119,7 @@ result:
 `score` == `score_detail.final`（排序键）；`score_detail` 解释“凭什么排这个位置”。
 
 ### `ask`
-params: `{"kb_root":str,"query":str,"top_k":5,"max_chars":6000,"weights":{…同上…}}`
+params: `{"kb_root":str,"query":str,"top_k":5,"max_chars":6000,"weights":{…同上…},"include_superseded":false}`
 result:
 ```json
 {"evidence":[{"path":"...","title":"...","heading":"...",

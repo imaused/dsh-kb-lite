@@ -4,7 +4,7 @@ Local knowledge base for DeepSeek Harness: ingest Markdown, text and PDF files, 
 
 English | [简体中文](README.zh.md)
 
-> **0.4.10** — `kb_stats` also reports `orphaned` (indexed document whose source file is gone) and `superseded` (Markdown front matter says `status: superseded`) counts, with up to 20 paths each. Earlier, 0.4.4 added `kb_sync` and index-freshness reporting.
+> **0.4.11** — `kb_search` / `kb_ask` now down-weight documents whose front matter says `status: superseded` (×0.3); pass `include_superseded: true` to rank them normally. Earlier, 0.4.10 added the `orphaned` / `superseded` counts, and 0.4.4 added `kb_sync` and index-freshness reporting.
 
 MIT. Host-only DSH plugin, six tools, no browser UI, and the engine opens no sockets. BM25 needs nothing beyond the Python standard library.
 
@@ -27,6 +27,7 @@ The scope is deliberately smaller than a full RAG stack: six tools, one local in
 - Optional dense retrieval through `sentence-transformers` and `BAAI/bge-small-zh-v1.5`, and `hybrid` mode that fuses both with reciprocal rank fusion (RRF).
 - Citations: `path`, `title`, `heading`, `start_line`/`end_line` for Markdown and text, `page` for PDF, plus `matched_by` showing which retriever found the chunk.
 - `kb_ask` returns verbatim source text inside a character budget — it does not paraphrase, summarise or rewrite.
+- Documents whose front matter says `status: superseded` are down-weighted (×0.3) in `kb_search` and `kb_ask`; pass `include_superseded: true` to rank them normally. This keeps old conclusions discoverable without letting them outrank the current one.
 - `kb_sync` re-ingests only the files changed since the build (by mtime) and appends a line to `sync-log.jsonl`. `kb_stats` reports `indexed_at`, `index_age_ms` and `newer_count`; `kb_search` / `kb_ask` warn when the index is older than the memory roots. It also reports `orphaned` (indexed, source file gone) and `superseded` (`status: superseded` in front matter) counts with up to 20 paths each.
 - One directory per knowledge base. No database server, no daemon, no port.
 
@@ -51,8 +52,8 @@ After it installs, restart DSH and open a **new** session. Tools are bound when 
 | Tool | What it does | Parameters |
 | --- | --- | --- |
 | `kb_ingest` | Index files or directories | `paths`, `recursive`, `force`, `prune`, `max_files`, `with_embeddings`, `chunk_chars`, `chunk_overlap`, `kb_root` |
-| `kb_search` | Return scored chunks with snippets | `query`, `top_k`, `mode` (`auto`, `bm25`, `dense`, `hybrid`), `kb_root` |
-| `kb_ask` | Return verbatim passages for the model to cite, within a character budget | `query`, `top_k`, `max_chars`, `kb_root` |
+| `kb_search` | Return scored chunks with snippets | `query`, `top_k`, `mode` (`auto`, `bm25`, `dense`, `hybrid`), `include_superseded`, `kb_root` |
+| `kb_ask` | Return verbatim passages for the model to cite, within a character budget | `query`, `top_k`, `max_chars`, `include_superseded`, `kb_root` |
 | `kb_stats` | Document and chunk counts, `kb_root`, size, `updated_at`, up to 50 indexed paths, `orphaned` / `superseded` counts | `kb_root` |
 | `kb_clear` | Remove the index | `confirm: true`, `kb_root` |
 
