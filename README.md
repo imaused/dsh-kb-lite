@@ -31,6 +31,10 @@ The scope is deliberately smaller than a full RAG stack: six tools, one local in
 - `kb_sync` re-ingests only the files changed since the build (by mtime) and appends a line to `sync-log.jsonl`. `kb_stats` reports `indexed_at`, `index_age_ms` and `newer_count`; `kb_search` / `kb_ask` warn when the index is older than the memory roots. It also reports `orphaned` (indexed, source file gone) and `superseded` (`status: superseded` in front matter) counts with up to 20 paths each.
 - One directory per knowledge base. No database server, no daemon, no port.
 
+## Companion
+
+[dsh-memory-archiver](https://github.com/imaused/dsh-memory-archiver) writes the memory files this plugin indexes: approval-free writes into memory roots, with `status: superseded` markers that `kb_search` / `kb_ask` down-weight. Each plugin works alone; install both for write + retrieval.
+
 ## Install
 
 ```sh

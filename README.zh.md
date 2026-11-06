@@ -31,6 +31,10 @@ MIT。宿主侧插件，六个工具，没有浏览器界面，引擎不打开�
 - front-matter 里 `status: superseded` 的文档在 `kb_search` / `kb_ask` 中降权（×0.3）；传 `include_superseded: true` 按原分参与排序。旧结论仍能被搜到，但不会压过当前结论。
 - 一个知识库一个目录。没有数据库服务，没有守护进程，不占端口。
 
+## 配套插件
+
+[dsh-memory-archiver](https://github.com/imaused/dsh-memory-archiver) 负责写：免审批地把记忆写进记忆根，并用 `status: superseded` 标记被取代的旧结论；`kb_search` / `kb_ask` 会对这类文档降权。两个插件可以单独用；一起装则“写入 + 检索”完整。
+
 ## 安装
 
 ```sh
