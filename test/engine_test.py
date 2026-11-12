@@ -964,6 +964,15 @@ class EncodingTests(unittest.TestCase):
         self.assertIn("网络共享", joined)
         self.assertIn("网络共享.md", ask["evidence"][0]["path"])
 
+    def test_utf16_bom_text_file_is_decoded(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        doc = Path(directory.name) / "unicode.txt"
+        doc.write_bytes("记事本 Unicode 文件：UTF-16 编码。".encode("utf-16"))
+        text = KB._read_text_file(str(doc))
+        self.assertIn("记事本 Unicode 文件", text)
+        self.assertNotIn("\x00", text)
+
 
 class SupersededSearchTests(unittest.TestCase):
     def setUp(self):

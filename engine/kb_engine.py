@@ -39,7 +39,7 @@ MANIFEST_VERSION = 1
 
 # --- safety / tuning caps -------------------------------------------------
 MAX_FILE_BYTES = 20 * 1024 * 1024          # skip files above 20 MB
-MAX_CHUNK_CHARS = 1200                     # hard upper bound for a chunk
+MAX_CHUNK_CHARS = 1200                     # default chunk size (per-ingest override: 200..8000)
 CHUNK_OVERLAP = 120                        # characters shared by neighbours
 CHUNK_CHARS_MIN = 200                      # per-ingest override floor
 CHUNK_CHARS_MAX = 8000                     # per-ingest override ceiling
@@ -220,23 +220,35 @@ def _sha256_file(path: str) -> str:
     return digest.hexdigest()
 
 
+def _decode_bytes(raw: bytes) -> str:
+    """Decode file bytes: UTF-16 (BOM), UTF-8 (with/without BOM), GB18030.
+
+    Windows Notepad's "Unicode" format is UTF-16 LE with a BOM; without
+    the BOM check it would fall through to GB18030, which accepts almost
+    any byte sequence, and be indexed as mojibake.
+    """
+    if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+        try:
+            return raw.decode("utf-16")
+        except UnicodeDecodeError:
+            pass
+    for encoding in ("utf-8-sig", "gb18030"):
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors="replace")
+
+
 def _read_text_file(path: str) -> str:
-    """Read a text file, tolerating UTF-8 (with/without BOM) and GB18030.
+    """Read a text file, tolerating UTF-16/UTF-8 (with/without BOM) and GB18030.
 
     CRLF/CR line endings are normalised to LF so chunk text and snippets are
     clean; line numbers are unaffected (one break stays one line).
     """
     with open(path, "rb") as handle:
         raw = handle.read()
-    text = None
-    for encoding in ("utf-8-sig", "gb18030"):
-        try:
-            text = raw.decode(encoding)
-            break
-        except UnicodeDecodeError:
-            continue
-    if text is None:
-        text = raw.decode("utf-8", errors="replace")
+    text = _decode_bytes(raw)
     if "\r" in text:
         text = text.replace("\r\n", "\n").replace("\r", "\n")
     return text
@@ -250,8 +262,8 @@ def _front_matter_status(path: str) -> str:
     the extension so PDFs and plain text are never opened here.
     """
     try:
-        with open(path, "r", encoding="utf-8-sig", errors="replace") as handle:
-            head = handle.read(2048)
+        with open(path, "rb") as handle:
+            head = _decode_bytes(handle.read(2048))
     except (OSError, ValueError):
         return ""
     if not head.startswith("---"):
@@ -1115,6 +1127,13 @@ class KBEngine:
         if dense_backend is None:
             dense_backend = make_dense_backend()
         self.dense = dense_backend
+        # Per-root parse caches: (storage signature, data), where the
+        # signature is the storage file's (size, mtime_ns), so atomic
+        # saves and external edits invalidate the entry. The engine
+        # handles one request at a time, so no locking is needed.
+        self._chunk_cache = {}
+        self._manifest_cache = {}
+        self._bm25_cache = {}
 
     # -- backend reporting -------------------------------------------------
     def _backend_report(self) -> Tuple[str, Optional[str], bool]:
@@ -1178,13 +1197,28 @@ class KBEngine:
                               "message": "%s: %s" % (type(exc).__name__, exc)}}
 
     # -- storage -----------------------------------------------------------
-    def _load_manifest(self, root: str) -> Dict[str, Any]:
+    @staticmethod
+    def _file_sig(path: str):
+        """Return (size, mtime_ns) of a storage file, or None when absent."""
+        try:
+            stat = os.stat(path)
+        except OSError:
+            return None
+        return (stat.st_size, stat.st_mtime_ns)
+
+    def _load_manifest(self, root: str, use_cache: bool = True) -> Dict[str, Any]:
         path = _child(root, MANIFEST_NAME)
+        sig = self._file_sig(path)
+        if use_cache and sig is not None:
+            entry = self._manifest_cache.get(root)
+            if entry is not None and entry[0] == sig:
+                return entry[1]
         empty = {"version": MANIFEST_VERSION, "docs": {}, "updated_at": None}
         try:
             with open(path, "r", encoding="utf-8") as handle:
                 data = json.load(handle)
         except FileNotFoundError:
+            self._manifest_cache.pop(root, None)
             return empty
         except (OSError, ValueError) as exc:
             log_event(root, "warn", "manifest unreadable, starting empty: %s" % exc)
@@ -1200,12 +1234,18 @@ class KBEngine:
             if isinstance(doc_id, str) and isinstance(entry, dict):
                 clean[doc_id] = entry
         chunk_cfg = data.get("chunk")
-        return {
+        manifest = {
             "version": MANIFEST_VERSION,
             "docs": clean,
             "chunk": chunk_cfg if isinstance(chunk_cfg, dict) else {},
             "updated_at": data.get("updated_at"),
         }
+        if use_cache:
+            if sig is not None:
+                self._manifest_cache[root] = (sig, manifest)
+            else:
+                self._manifest_cache.pop(root, None)
+        return manifest
 
     def _save_manifest(self, root: str, manifest: Dict[str, Any]) -> None:
         path = _child(root, MANIFEST_NAME)
@@ -1214,10 +1254,16 @@ class KBEngine:
 
     def _load_chunks(self, root: str) -> List[Dict[str, Any]]:
         path = _child(root, CHUNKS_NAME)
+        sig = self._file_sig(path)
+        if sig is not None:
+            entry = self._chunk_cache.get(root)
+            if entry is not None and entry[0] == sig:
+                return entry[1]
         chunks: List[Dict[str, Any]] = []
         try:
             handle = open(path, "r", encoding="utf-8", errors="replace")
         except FileNotFoundError:
+            self._chunk_cache.pop(root, None)
             return chunks
         except OSError as exc:
             log_event(root, "warn", "chunks.jsonl unreadable: %s" % exc)
@@ -1254,6 +1300,10 @@ class KBEngine:
                     "page": record.get("page"),
                     "text": text,
                 })
+        if sig is not None:
+            self._chunk_cache[root] = (sig, chunks)
+        else:
+            self._chunk_cache.pop(root, None)
         return chunks
 
     def _save_chunks(self, root: str, chunks: Sequence[Dict[str, Any]]) -> None:
@@ -1631,7 +1681,8 @@ class KBEngine:
         with_embeddings = params.get("with_embeddings", "auto")
         chunk_cfg = _chunk_cfg(params)
 
-        manifest = self._load_manifest(root)
+        # Ingest mutates the loaded dicts in place; bypass the cache.
+        manifest = self._load_manifest(root, use_cache=False)
         docs_meta: Dict[str, Any] = manifest["docs"]
         # A legacy index has no "chunk" block: treat it as the defaults, so an
         # upgrade alone re-chunks nothing, while an explicit different setting does.
@@ -1828,8 +1879,20 @@ class KBEngine:
         }
 
     # -- retrieval ---------------------------------------------------------
-    def _bm25_scores(self, chunks: Sequence[Dict[str, Any]], query: str) -> List[float]:
-        index = BM25Index([tokenize(chunk.get("text") or "") for chunk in chunks])
+    def _bm25_scores(self, root: str, chunks: Sequence[Dict[str, Any]],
+                     query: str) -> List[float]:
+        """BM25 over the current chunks, cached per root while they hold.
+
+        ``chunks`` is the list returned by ``_load_chunks``: a stable
+        object while chunks.jsonl is unchanged, so the index is keyed on
+        its identity and rebuilt whenever a save produces a new list.
+        """
+        cached = self._bm25_cache.get(root)
+        if cached is not None and cached[0] is chunks:
+            index = cached[1]
+        else:
+            index = BM25Index([tokenize(chunk.get("text") or "") for chunk in chunks])
+            self._bm25_cache[root] = (chunks, index)
         return index.scores(tokenize(query))
 
     def _retrieve(self, root: str, chunks: Sequence[Dict[str, Any]],
@@ -1840,7 +1903,7 @@ class KBEngine:
         w_bm25 = _weight_value(weights.get("bm25"), 1.0)
         w_dense = _weight_value(weights.get("dense"), 1.0)
         rrf_k = int(_weight_value(weights.get("rrf_k"), float(RRF_K), minimum=1.0))
-        bm25_scores = self._bm25_scores(chunks, query)
+        bm25_scores = self._bm25_scores(root, chunks, query)
         candidate_limit = max(top_k * 4, top_k)
         order = sorted(range(len(chunks)), key=lambda index: (-bm25_scores[index], index))
         bm25_rank = [index for index in order if bm25_scores[index] > 0.0][:candidate_limit]
